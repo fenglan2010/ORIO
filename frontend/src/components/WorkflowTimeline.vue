@@ -73,7 +73,7 @@ const labels = {
   human_review: "人工审核",
   execution_node: "模拟执行",
   rollback: "检查点回滚",
-  memory_node: "经验沉淀（预留）",
+  memory_node: "经验沉淀",
 };
 
 function shortId(id) {

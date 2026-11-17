@@ -292,13 +292,20 @@ class DecisionCheckpoint(Base):
 
 
 class MemoryRecord(Base):
-    """Reserved L5 long-term memory table. Structure only — no learning in this MVP."""
+    """In-hotel decision episode memory. Strictly per hotel_id; identifiable data never crosses hotels."""
 
     __tablename__ = "memory_records"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    hotel_id: Mapped[int] = mapped_column(ForeignKey("hotels.id"), nullable=False)
-    kind: Mapped[str] = mapped_column(String(32), default="reserved")
+    hotel_id: Mapped[int] = mapped_column(ForeignKey("hotels.id"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(32), default="decision_episode")
+    run_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("workflow_runs.id"), nullable=True, index=True)
+    strategy_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("strategies.id"), nullable=True, index=True)
+    checkpoint_id: Mapped[str] = mapped_column(String(64), default="")
+    approval_status: Mapped[str] = mapped_column(String(32), default="")
+    action_kind: Mapped[str] = mapped_column(String(32), default="")  # pricing | campaign | review_reply
+    risk_level: Mapped[str] = mapped_column(String(16), default="")
+    episode_key: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
@@ -372,3 +379,35 @@ class JobRun(Base):
     error: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
+class IndustryPattern(Base):
+    """Anonymized cross-hotel decision pattern. This row stores no hotel identity."""
+
+    __tablename__ = "industry_patterns"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    pattern_key: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    action_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    signal_types: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    risk_level: Mapped[str] = mapped_column(String(16), default="")
+    terminal_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    price_direction: Mapped[str] = mapped_column(String(16), default="")
+    episode_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_contributed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class IndustryPatternContribution(Base):
+    """Private contribution map for k-anonymity and self-exclusion. Never returned by hotel-facing APIs."""
+
+    __tablename__ = "industry_pattern_contributions"
+    __table_args__ = (
+        UniqueConstraint("pattern_id", "episode_key", name="uq_pattern_episode_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    pattern_id: Mapped[int] = mapped_column(ForeignKey("industry_patterns.id"), nullable=False, index=True)
+    hotel_id: Mapped[int] = mapped_column(ForeignKey("hotels.id"), nullable=False, index=True)
+    memory_record_id: Mapped[int | None] = mapped_column(ForeignKey("memory_records.id"), nullable=True)
+    episode_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

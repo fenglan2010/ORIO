@@ -1,9 +1,12 @@
 """Decision workflow: LangGraph when available, equivalent state machine otherwise.
 
 Node path (fixed; the model cannot choose the next hop):
-  data_node → signal_node → analysis_node → strategy_node → human_review → execution_node
+  data_node → signal_node → analysis_node → strategy_node → human_review → execution_node → memory_node
 
-memory_node is reserved for L5 and is not on the MVP path.
+memory_node persists an in-hotel decision episode after a terminal disposition
+(approved execution or a final rejection). It does not skip human_review,
+does not invent impact metrics, and never reads another hotel's identifiable rows.
+Anonymized peer patterns may be attached as a separate state field and cited as context only.
 Risk level is recorded on every strategy. By default it never skips human_review.
 When the hotel enables auto-execute, only low-risk actions that also pass the
 execution policy may continue to execution_node without waiting for a person.
@@ -44,7 +47,7 @@ ANALYSIS_NODE = "analysis_node"
 STRATEGY_NODE = "strategy_node"
 HUMAN_REVIEW = "human_review"
 EXECUTION_NODE = "execution_node"
-MEMORY_NODE = "memory_node"  # reserved, not executed in MVP
+MEMORY_NODE = "memory_node"
 ROLLBACK_NODE = "rollback"  # recorded when a rollback is applied
 
 PRE_REVIEW_NODES = (DATA_NODE, SIGNAL_NODE, ANALYSIS_NODE, STRATEGY_NODE)
@@ -74,8 +77,7 @@ def _try_langgraph():
     builder.add_node(STRATEGY_NODE, _lg_strategy)
     builder.add_node(HUMAN_REVIEW, _lg_human_review)
     builder.add_node(EXECUTION_NODE, _lg_execution)
-    # memory_node is registered as a no-op extension point but not wired into the path.
-    builder.add_node(MEMORY_NODE, _lg_memory_reserved)
+    builder.add_node(MEMORY_NODE, _lg_memory)
 
     builder.add_edge(START, DATA_NODE)
     builder.add_edge(DATA_NODE, SIGNAL_NODE)
@@ -87,9 +89,10 @@ def _try_langgraph():
     builder.add_conditional_edges(
         HUMAN_REVIEW,
         _lg_after_review,
-        {"execute": EXECUTION_NODE, "stop": END},
+        {"execute": EXECUTION_NODE, "remember": MEMORY_NODE, "stop": END},
     )
-    builder.add_edge(EXECUTION_NODE, END)
+    builder.add_edge(EXECUTION_NODE, MEMORY_NODE)
+    builder.add_edge(MEMORY_NODE, END)
 
     try:
         checkpointer = open_checkpointer()
@@ -131,14 +134,19 @@ def _lg_execution(state: dict) -> dict:
     return _run_named_node(EXECUTION_NODE, state)
 
 
-def _lg_memory_reserved(state: dict) -> dict:
-    # Intentionally unused in MVP. Kept so the graph already has the extension point.
-    return state
+def _lg_memory(state: dict) -> dict:
+    return _run_named_node(MEMORY_NODE, state)
 
 
 def _lg_after_review(state: dict) -> str:
-    if (state.get("approval_status") or "") == "approved":
+    approval = (state.get("approval_status") or "").lower()
+    status = (state.get("status") or "").lower()
+    if approval == "approved" or status == "approved":
         return "execute"
+    from app.services.memory import should_persist_episode
+
+    if should_persist_episode(state) or approval in {"rejected", "rolled_back"} or status in {"rejected", "rolled_back"}:
+        return "remember"
     return "stop"
 
 
@@ -156,8 +164,8 @@ def engine_info(db=None, hotel_id: int | None = None) -> dict:
         "reason": _LG_REASON,
         "checkpointer": meta.get("kind") or "none",
         "checkpointer_durable": bool(meta.get("durable")),
-        "nodes": list(PRE_REVIEW_NODES) + [HUMAN_REVIEW, EXECUTION_NODE],
-        "reserved_nodes": [MEMORY_NODE],
+        "nodes": list(PRE_REVIEW_NODES) + [HUMAN_REVIEW, EXECUTION_NODE, MEMORY_NODE],
+        "reserved_nodes": [],
         "auto_execute_on_low_risk": bool(policy.auto_execute_enabled),
         "execution_policy": policy.to_public_dict(),
     }
@@ -176,6 +184,9 @@ class OIROState(TypedDict, total=False):
     approval_status: str
     checkpoint_id: str
     historical_strategies: list
+    historical_memories: list
+    peer_patterns: list
+    industry_patterns: list
     run_id: int
     kind: str
     room_type_id: int | None
@@ -265,6 +276,7 @@ def _run_named_node(name: str, state: dict) -> dict:
         STRATEGY_NODE: strategy_node,
         HUMAN_REVIEW: human_review_node,
         EXECUTION_NODE: execution_node,
+        MEMORY_NODE: memory_node,
     }[name]
     before = {
         "current_node": state.get("current_node"),
@@ -404,6 +416,16 @@ def analysis_node(state: dict) -> dict:
         "classification": diagnosis.get("classification"),
         "price_inversions": (state.get("signals") or {}).get("price_inversions"),
     }
+    from app.services.memory import in_hotel_memory_facts
+
+    memory_facts = in_hotel_memory_facts(state)
+    if memory_facts:
+        facts["in_hotel_recent_decisions"] = memory_facts
+    from app.services.industry_patterns import peer_pattern_facts
+
+    patterns = peer_pattern_facts(state)
+    if patterns:
+        facts["anonymous_peer_patterns"] = patterns
     gateway = get_gateway()
     resp = gateway.complete(
         LLMRequest(
@@ -427,6 +449,16 @@ def analysis_node(state: dict) -> dict:
         diagnosis["llm"] = resp.structured
     diagnosis["degraded"] = resp.degraded
     diagnosis["degrade_notice"] = resp.degrade_notice
+    if memory_facts:
+        diagnosis["in_hotel_memory_note"] = (
+            "已引用本店近期已执行或已否决的决策作为上下文；这不是跨店学习，"
+            "也不会据此跳过人审或自动改价。"
+        )
+    if patterns:
+        diagnosis["peer_pattern_note"] = (
+            "已引用匿名行业模式：同类酒店在类似信号下曾执行或否决类似动作。"
+            "跨店学习为匿名模式，不展示其他酒店名称，不会训练模型，不会自动改价，也不会据此跳过人审。"
+        )
     state["analysis_result"] = diagnosis
     state["degraded"] = bool(resp.degraded)
     return state
@@ -460,12 +492,22 @@ def strategy_node(state: dict) -> dict:
 
     if kind == "review_reply":
         review = db.get(Review, int(state["review_id"]))
+        from app.services.memory import in_hotel_memory_facts
+
         facts = {
             "rating": review.rating,
             "guest_name": review.guest_name,
             "content": review.content,
             "title": review.title,
         }
+        memory_facts = in_hotel_memory_facts(state)
+        if memory_facts:
+            facts["in_hotel_recent_decisions"] = memory_facts
+        from app.services.industry_patterns import peer_pattern_facts
+
+        patterns = peer_pattern_facts(state)
+        if patterns:
+            facts["anonymous_peer_patterns"] = patterns
         resp = get_gateway().complete(
             LLMRequest(
                 task_type="review_reply",
@@ -516,11 +558,21 @@ def strategy_node(state: dict) -> dict:
             date_from=date_from,
             date_to=date_to,
         )
+        from app.services.memory import in_hotel_memory_facts
+
         facts = {
             "kind": "campaign",
             "campaign_advice": advice,
             "rooms": [p["room_name"] for p in pricing_results],
         }
+        memory_facts = in_hotel_memory_facts(state)
+        if memory_facts:
+            facts["in_hotel_recent_decisions"] = memory_facts
+        from app.services.industry_patterns import peer_pattern_facts
+
+        patterns = peer_pattern_facts(state)
+        if patterns:
+            facts["anonymous_peer_patterns"] = patterns
         resp = get_gateway().complete(
             LLMRequest(
                 task_type="pricing_strategy",
@@ -574,6 +626,16 @@ def strategy_node(state: dict) -> dict:
         "constraints": pricing["constraints"],
         "signals": pricing["signals"],
     }
+    from app.services.memory import in_hotel_memory_facts
+
+    memory_facts = in_hotel_memory_facts(state)
+    if memory_facts:
+        facts["in_hotel_recent_decisions"] = memory_facts
+    from app.services.industry_patterns import peer_pattern_facts
+
+    patterns = peer_pattern_facts(state)
+    if patterns:
+        facts["anonymous_peer_patterns"] = patterns
     resp = get_gateway().complete(
         LLMRequest(
             task_type="pricing_strategy",
@@ -666,6 +728,20 @@ def execution_node(state: dict) -> dict:
     else:
         state["status"] = "execution_failed"
         state["error"] = job.last_error or result.get("message")
+    return state
+
+
+def memory_node(state: dict) -> dict:
+    """Persist an in-hotel decision episode and an anonymized industry pattern. Idempotent."""
+    from app.services.memory import persist_decision_episode, should_persist_episode
+
+    if not should_persist_episode(state):
+        state["memory_skipped"] = True
+        return state
+    row = persist_decision_episode(_db(), state)
+    if row is not None:
+        state["memory_id"] = row.id
+        state["memory_kind"] = row.kind
     return state
 
 
@@ -777,6 +853,9 @@ def _initial_state(run: WorkflowRun, **kwargs) -> dict:
         "approval_status": "pending",
         "checkpoint_id": "",
         "historical_strategies": [],
+        "historical_memories": [],
+        "peer_patterns": [],
+        "industry_patterns": [],
         "run_id": run.id,
         "kind": run.kind,
         "room_type_id": kwargs.get("room_type_id"),
@@ -794,6 +873,11 @@ def _initial_state(run: WorkflowRun, **kwargs) -> dict:
         "actor": kwargs.get("actor") or run.created_by,
         "path": [],
     }
+    from app.services.memory import attach_hotel_memories
+    from app.services.industry_patterns import attach_peer_patterns
+
+    attach_hotel_memories(state, _db())
+    attach_peer_patterns(state, _db())
     return state
 
 
@@ -1062,6 +1146,12 @@ def apply_human_decision(
         run.status = "rejected"
         run.current_node = HUMAN_REVIEW
 
+    from app.services.memory import should_persist_episode
+
+    if should_persist_episode(state):
+        state = _run_named_node(MEMORY_NODE, state)
+        run.current_node = MEMORY_NODE
+
     run.payload = _json_safe(state)
     run.updated_at = datetime.utcnow()
     db.commit()
@@ -1174,6 +1264,13 @@ def rollback_run(db: Session, run: WorkflowRun, actor: str, reason: str = "") ->
     from app.services.writes import mark_jobs_rolled_back
 
     mark_jobs_rolled_back(db, workflow_run_id=run.id, actor=actor)
+    from app.services.memory import should_persist_episode
+
+    if should_persist_episode(state):
+        state = _run_named_node(MEMORY_NODE, state)
+        run.current_node = MEMORY_NODE
+        run.payload = _json_safe(state)
+        db.commit()
     return state
 
 

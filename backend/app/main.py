@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
-from app.api import campaigns, alerts, audit, auth, channels, chat, dashboard, diagnosis, jobs, reviews, settings, strategies, users, writes
+from app.api import campaigns, alerts, audit, auth, channels, chat, dashboard, diagnosis, jobs, memories, reviews, settings, strategies, users, writes
 from app.config import validate_runtime_settings
 from app.database import init_db, is_postgres_url
 from app.schemas import HealthResponse
@@ -48,6 +48,7 @@ app.include_router(settings.router)
 app.include_router(channels.router)
 app.include_router(writes.router)
 app.include_router(jobs.router)
+app.include_router(memories.router)
 
 
 @app.on_event("startup")

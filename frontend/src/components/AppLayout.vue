@@ -169,7 +169,7 @@
       <b>L2 策略分析师</b>：对照多维分析，生成并查看策略建议。<br>
       <b>L3 执行型助手</b>：把待人审策略放入执行队列，确认或拒绝；评价回复也在这里完成人审。<br>
       <b>L4 收益运营官</b>：本阶段仅展示自治管理界面，<b>不会自动调价</b>。决策日志接审计记录。<br>
-      <b>L5 系统进化</b>：预览/演示界面，不代表已上线进化引擎。</p>
+      <b>L5 本店经验沉淀</b>：展示本店已执行或已否决的决策，并可引用匿名行业模式。跨店学习已开始，但是匿名模式，不展示其他酒店名称，不会训练模型，也不会自动改价。</p>
       <h3>演示账号</h3>
       <p>杭州西湖精品酒店（演示）：admin / admin123（酒店管理员）、manager / manager123（收益经理）、approver / approver123（调价审批人）、analyst / analyst123（运营观察）。成都春熙商务酒店（演示）：admin_b / admin123（仅该店管理员）。两个酒店的数据互相隔离。</p>
     </div>
@@ -212,7 +212,7 @@ const sections = [
   { level: "L2", role: "策略分析师", label: "多维分析", to: "/analysis", match: ["/analysis", "/l2"], icon: "trend", activeClass: "active-l2", cap: "view_l2" },
   { level: "L3", role: "执行型助手", label: "执行中心", to: "/execution", match: ["/execution", "/l3"], icon: "play", activeClass: "active-l3", cap: "view_l3" },
   { level: "L4", role: "收益运营官", label: "自治管理", to: "/autonomy", match: ["/autonomy", "/l4"], icon: "target", activeClass: "active-l4", cap: "view_l4" },
-  { level: "L5", role: "自主收益系统", label: "系统进化", to: "/evolution", match: ["/evolution", "/l5"], icon: "spark", activeClass: "active-l5", cap: "view_l5" },
+  { level: "L5", role: "自主收益系统", label: "经验沉淀", to: "/evolution", match: ["/evolution", "/l5"], icon: "spark", activeClass: "active-l5", cap: "view_l5" },
 ];
 const visibleSections = computed(() => sections.filter((s) => can(s.cap, me)));
 
@@ -274,7 +274,7 @@ const searchIndex = computed(() => {
     { key: "p-l3", title: "L3 执行中心", hint: "人审队列、评价回复", to: "/execution", cap: "view_l3" },
     { key: "p-rev", title: "评价与回复", hint: "草稿、人审、回滚", to: "/execution?tab=reviews", cap: "view_l3" },
     { key: "p-l4", title: "L4 自治管理", hint: "决策日志与执行策略", to: "/autonomy", cap: "view_l4" },
-    { key: "p-l5", title: "L5 系统进化", hint: "预览 / 演示", to: "/evolution", cap: "view_l5" },
+    { key: "p-l5", title: "L5 本店经验沉淀", hint: "匿名跨店学习", to: "/evolution", cap: "view_l5" },
     { key: "p-set", title: "系统设置", hint: "账号、酒店、外观", to: "/settings" },
     { key: "p-aud", title: "日志查看", hint: "操作审计与模型调用", to: "/audit", cap: "view_audit" },
     { key: "p-chat", title: "决策对话", hint: "自然语言追问", action: "chat", cap: "view_chat" },

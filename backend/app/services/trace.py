@@ -32,7 +32,7 @@ NODE_LABELS = {
     "human_review": "人工审核",
     "execution_node": "沙盒执行",
     "rollback": "检查点回滚",
-    "memory_node": "经验沉淀（预留）",
+    "memory_node": "经验沉淀",
 }
 
 KIND_LABELS = {
@@ -166,6 +166,16 @@ def summarize_node(
         result = state.get("execution_result") or (strategy.execution_payload if strategy else None) or {}
         msg = result.get("message") if isinstance(result, dict) else None
         return msg or "已按审核结果写入官方沙盒回执，未向真实 OTA 发送请求。"
+
+    if node_name == "memory_node":
+        status = (state.get("status") or state.get("approval_status") or "").lower()
+        if status == "rejected":
+            return "已将本店否决结论写入经验沉淀。结果影响尚未测算。"
+        if status == "rolled_back":
+            return "已将本店回滚结论写入经验沉淀。结果影响尚未测算。"
+        if status in {"execution_failed", "execution_partial"}:
+            return "已将本店执行结果写入经验沉淀。结果影响尚未测算。"
+        return "已将本店决策写入经验沉淀。结果影响尚未测算，不会据此自动改价。"
 
     if node_name == "rollback":
         result = state.get("execution_result") or {}

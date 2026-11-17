@@ -68,6 +68,8 @@ export const api = {
     request(`/api/reviews/${id}/rollback`, { method: "POST", body: JSON.stringify({ decision: "rollback", comment }) }),
   chatHistory: () => request("/api/chat/history"),
   chat: (message) => request("/api/chat", { method: "POST", body: JSON.stringify({ message }) }),
+  memories: (params = "") => request("/api/memories" + (params ? "?" + params : "")),
+  industryPatterns: (params = "") => request("/api/memories/patterns" + (params ? "?" + params : "")),
   audit: () => request("/api/audit"),
   modelCalls: () => request("/api/audit/model-calls"),
   workflow: (id) => request(`/api/audit/workflows/${id}`),

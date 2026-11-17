@@ -33,7 +33,7 @@ const router = createRouter({
         { path: "l3", redirect: "/execution" },
         { path: "autonomy", component: Autonomy, meta: { title: "自治管理", capability: "view_l4" } },
         { path: "l4", redirect: "/autonomy" },
-        { path: "evolution", component: Evolution, meta: { title: "系统进化", capability: "view_l5" } },
+        { path: "evolution", component: Evolution, meta: { title: "本店经验沉淀", capability: "view_l5" } },
         { path: "l5", redirect: "/evolution" },
         { path: "settings", component: Settings, meta: { title: "系统设置" } },
         { path: "audit", component: Audit, meta: { title: "日志查看", capability: "view_audit" } },

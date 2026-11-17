@@ -145,6 +145,33 @@ def migrate_schema() -> None:
         audit_names = _column_names(conn, "audit_logs")
         if audit_names and "hotel_id" not in audit_names:
             conn.execute(text("ALTER TABLE audit_logs ADD COLUMN hotel_id INTEGER"))
+        mem_names = _column_names(conn, "memory_records")
+        if mem_names:
+            additions = [
+                ("run_id", "INTEGER"),
+                ("strategy_id", "INTEGER"),
+                ("checkpoint_id", "VARCHAR(64) DEFAULT ''"),
+                ("approval_status", "VARCHAR(32) DEFAULT ''"),
+                ("action_kind", "VARCHAR(32) DEFAULT ''"),
+                ("risk_level", "VARCHAR(16) DEFAULT ''"),
+                ("episode_key", "VARCHAR(128)"),
+            ]
+            for col, typ in additions:
+                if col not in mem_names:
+                    conn.execute(text(f"ALTER TABLE memory_records ADD COLUMN {col} {typ}"))
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_episode_key "
+                    "ON memory_records (episode_key) "
+                    "WHERE episode_key IS NOT NULL AND episode_key <> ''"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_memory_records_hotel_id_id "
+                    "ON memory_records (hotel_id, id)"
+                )
+            )
         if engine.dialect.name == "postgresql":
             conn.execute(text("CREATE SCHEMA IF NOT EXISTS langgraph"))
 
