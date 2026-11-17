@@ -1,0 +1,124 @@
+# OIRO · OTA 智能收益优化官（网页版 MVP）
+
+可本地一键启动的中文 Web 演示：看见问题 → 看懂原因 → 给出策略 → 人审（可选的低风险自动执行）→ 留下沙盒执行记录。
+
+本仓库按 `/workspace/oiro/docs/` 中的产品定义实现。`docs/source/` 是早期设想归档，冲突时以文档正文为准。
+
+## 启动
+
+在项目根目录执行：
+
+```bash
+make dev
+# 或
+bash scripts/dev.sh
+```
+
+- 前端：http://127.0.0.1:5173
+- 后端：http://127.0.0.1:8000
+- 健康检查：http://127.0.0.1:8000/api/health
+- **默认演示账号：`admin` / `admin123`**（杭州西湖精品酒店）。成都春熙商务酒店演示账号：`admin_b` / `admin123`。
+
+首次启动会创建 `.venv`、安装依赖、写入 `data/oiro.db` 并导入演示数据。前端通过 Vite 把 `/api` 代理到后端，CORS 已允许本地 5173 端口。
+
+复制 `.env.example` 为 `.env` 后可填入国产模型密钥。没有密钥时，DeepSeek / 通义会自动降级到本地确定性模拟器，主流程仍可完整演示。
+
+## 重置演示数据
+
+```bash
+make reset
+# 或
+bash scripts/reset_db.sh
+```
+
+普通启动会按「今天」滚动刷新近 14 天 + 未来 14 天的模拟指标，但**不会打断已有人审、执行与审计记录**。`reset` 会清空数据库后重新导入，人审历史会被删除。
+
+## 数据库
+
+本地默认是 SQLite（`data/oiro.db`），无需额外服务。切换 PostgreSQL 时设置：
+
+```bash
+# 腾讯云 TencentDB / 阿里云 RDS：优先私网地址，并要求 TLS
+export DATABASE_URL=postgresql+psycopg://USER:PASSWORD@PRIVATE_HOST:5432/oiro?sslmode=require
+```
+
+也接受 `postgresql://` 或 `postgres://`。不要把带密码的 URL 写进仓库或打到日志。上云前必须更换默认的 `JWT_SECRET`。LangGraph 检查点在 SQLite 下写入 `*.langgraph.db`，在 PostgreSQL 下写入同一库的 `langgraph` schema，进程重启后仍可恢复待人审运行。完整说明见 [docs/09-第三阶段.md](docs/09-第三阶段.md)。任务队列默认用本地调度进程，无需 Redis；配置 broker 后可改用 Celery。生产形态的部署用 Docker Compose 或 Kubernetes，说明见下方「部署」和 [docs/09-第三阶段.md](docs/09-第三阶段.md)。
+
+可选的本地测试 Postgres（仅 127.0.0.1，带密码）：
+
+```bash
+bash scripts/run_test_postgres.sh start
+source /tmp/oiro-pgtest/env.sh
+make test
+```
+
+## 部署
+
+本地演示继续用上面的 `make dev` / `scripts/dev.sh`（SQLite，5173 / 8000）。不要把这条共享演示进程改切到 Compose 里的 Postgres。
+
+要在本机或单机虚机拉起生产形态的栈（前端、API、Postgres、Redis、Celery worker / beat）：
+
+```bash
+cp deploy/compose.env.example deploy/compose.env
+# 填写 JWT_SECRET 与 POSTGRES_PASSWORD（不要使用 oiro-demo-secret-change-me）
+docker compose --env-file deploy/compose.env up -d --build
+```
+
+- 网页入口：http://127.0.0.1:8080
+- API（仅本机）：http://127.0.0.1:18000/api/health
+- Postgres 与 Redis 只在内部网络，不映射到主机端口。
+
+云上生产优先使用同一 VPC 内的腾讯云 TencentDB / 阿里云 RDS PostgreSQL 和托管 Redis，并在 `DATABASE_URL` 上加 `sslmode=require`（或 verify-ca / verify-full）。Kubernetes 清单在 `deploy/k8s/`（含 TKE / ACK overlay 占位符）。设置 `OIRO_ENV=production` 后，进程会拒绝演示 JWT 密钥，也不会静默使用 SQLite。完整步骤、安全清单和「本增量未包含的内容」见 [docs/09-第三阶段.md](docs/09-第三阶段.md) 与 [deploy/README.md](deploy/README.md)。
+
+## 运行测试
+
+```bash
+make test
+```
+
+覆盖：关键动作在境外模型开启时仍不出境；人审通过 / 拒绝 / 回滚写入审计；无密钥时看板、生成策略、人审可跑通。
+
+前端验收构建：
+
+```bash
+make build
+```
+
+## 演示故事（模拟数据，不是真实 OTA）
+
+现有两家互相隔离的演示酒店，平台均为**携程（模拟）**。时间窗口以当天为基准，近 14 天历史 + 未来 14 天可定价。
+
+- **杭州西湖精品酒店（演示）**：豪华大床房、商务双床房、家庭房。近一周搜索排名下滑，西湖和禧、湖滨商务等竞对降价 12%–18%，我方挂牌价基本未动，形成**价格倒挂**，并有一条提及噪音与卫生的 2 分差评。账号：`admin` / `admin123`、`manager` / `manager123`、`approver` / `approver123`、`analyst` / `analyst123`。
+- **成都春熙商务酒店（演示）**：高级大床房、商务双床房。工作日出租率弱于周末，并有一条提到地下停车场车位紧张的 3 分评价。这是另一家店的故事，不是杭州数据的复制。账号：`admin_b` / `admin123`（只能看见成都店）。
+
+在执行中心可生成调价与活动参与建议，看到价格区间、理由、置信度、风险等级和决策路径。默认须人审；酒店也可在设置或 L4 页开启低风险自动执行。通过后写入官方沙盒回执（不是真实携程调价），并可按 `checkpoint_id` 回滚。两家酒店的策略、预警、账号和执行策略互不可见。
+
+## 实现要点
+
+- 控制流节点：`data_node → signal_node → analysis_node → strategy_node → human_review → execution_node`。`memory_node` 只预留，不执行学习。
+- 优先使用 **LangGraph**；若环境无法安装，则使用节点名称与语义等价的状态机，并在系统设置页标明。
+- 模型网关：统一协议；适配 DeepSeek（主）、Qwen（备）、OpenAI、Gemini、Grok、Mock。境外模型默认关闭。`pricing_strategy` 与 `review_reply` 即使开关打开也绝不出境。
+- 价格区间由可解释启发式计算，大模型只写理由，不得直接给出不可复核的执行价。
+- 风险等级 `low / medium / high` 用于展示、审计和放行。**默认自动执行关闭**，行为与第一阶段相同。酒店开启后，仅低风险、非节假日、调价幅度低于阈值（默认 15%）的方案可自动执行；中高风险、活动报名和评价回复仍必须人审。自动执行审计操作人为 `system:auto_execute`，并保留检查点与回滚。
+- 执行前写入 Checkpoint，回滚绑定 `checkpoint_id`。界面可追溯一条策略经过的节点。
+
+## 页面
+
+杭州店演示账号：`admin` / `admin123`（酒店管理员）、`manager` / `manager123`（收益经理）、`approver` / `approver123`（调价审批人）、`analyst` / `analyst123`（运营观察）。成都店：`admin_b` / `admin123`（仅该店管理员）。权限由固定角色矩阵控制：管理员可管理本店账号、执行策略和渠道连接；收益经理可审批并执行但不能改策略、渠道或账号；审批人可审批但不能执行；运营观察仅查看 L1–L2。账号只能看见自己所属酒店的数据。
+
+登录后为 L1–L5 分层导航（视觉与信息架构对齐 Figma 雏形，产品名仍为 OIRO / 智能收益优化官）：
+
+- `#/dashboard`（`#/l1`）L1 实时监控大屏：真实 KPI、房型、趋势与预警诊断（通知开关会过滤对应类型的未关闭预警）
+- `#/analysis`（`#/l2`）L2 多维分析与策略建议（一键生成）
+- `#/execution`（`#/l3`，页签 `tab=`）L3 执行中心：待人审队列、评价回复、写入监控（沙盒或真实官方回执、对账与重试）
+- `#/autonomy`（`#/l4`）L4 自治管理（可开关与设置页相同的低风险自动执行策略；默认关闭；渠道连接状态；日志接审计）
+- `#/evolution`（`#/l5`）L5 系统进化（预览/演示）
+- `#/analysis`（`#/l2`）L2 多维分析：需求、库存压力、预订节奏、历史对比、渠道转化、竞对与房型；支持按日期因果诊断。渠道净贡献暂用房型营收替代，取消/活动/客群/弹性/佣金/直销因缺少独立数据保持空态
+- `#/execution`（`#/l3`）L3 执行中心：调价建议、活动参与建议、评价回复、决策路径追溯；库存滑条与自动保护为本阶段预览
+- `#/settings?section=` 系统设置（酒店管理员可管理账号、执行策略和渠道连接；收益经理可改价格约束；全员可查看真实角色权限矩阵。模型路由、适配器状态、境内外开关和原始 API 密钥不在酒店用户侧展示；PMS 为后续阶段）
+- `#/audit` 日志查看（侧栏「日志查看」进入）
+- 决策对话在顶栏打开抽屉；旧地址 `#/alerts`、`#/strategies`、`#/reviews`、`#/chat` 会重定向到新位置
+
+## 本轮未做
+
+爬虫、PMS/CRS 对接、评价回复自动发布、计费与私有化、L5 跨酒店学习、桌面端与小程序，以及实际开通腾讯云 / 阿里云账号、ICP 备案或等保测评。第二阶段已支持可选的低风险自动执行、渠道授权、官方沙盒写回执、在已配置官方契约时的真实出站写入，以及酒店账号与固定角色权限矩阵。第三阶段已做真实多酒店租户隔离（杭州与成都两家演示酒店）、可选的 PostgreSQL 与持久化 LangGraph checkpointer（默认演示仍走 SQLite）、任务队列（本地调度进程，可选 Celery；采集/写入重试/对账），以及可复制部署（Docker Compose 与面向腾讯云 TKE / 阿里云 ACK 的 Kubernetes 清单）。本仓库默认不内置、也不会自动加载携程/美团/飞猪生产环境 URL；酒店管理员可为本店安装合作方提供的正式契约。无契约或凭证时 live 模式会拒绝写入，且不会出站 HTTP。演示默认 `write_mode=sandbox`、自动执行关闭，且不预装生产契约。
