@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -18,10 +19,11 @@ from app.adapters.ota.official_http import (
     env_credentials,
     load_official_contract,
     platform_write_enabled,
+    public_action_labels,
     public_contract_status,
 )
 from app.config import get_settings
-from app.models import ChannelConnection
+from app.models import ChannelConnection, SystemSetting
 
 PLATFORM_LABELS = {
     "ctrip": "携程",
@@ -84,21 +86,117 @@ def _get_or_create(db: Session, hotel_id: int, platform: str) -> ChannelConnecti
     return row
 
 
-def merged_credentials(row: ChannelConnection | None, platform: str) -> dict[str, str]:
+def merged_credentials(row: ChannelConnection | None, platform: str, db: Session | None = None, hotel_id: int | None = None) -> dict[str, str]:
     stored = decrypt_credentials(row.credentials_encrypted if row else "")
     env = env_credentials(platform)
+    ops = load_official_api_credentials(db, hotel_id if hotel_id is not None else (row.hotel_id if row else None), platform)
     merged = dict(env)
-    merged.update({k: v for k, v in stored.items() if v})
+    merged.update({k: v for k, v in ops.items() if v})
+    # Hotel account/password overlay last, but do not let a hotel password wipe an official API key
+    # unless the hotel itself stored a key/token.
+    hotel_overlay = {k: v for k, v in stored.items() if v}
+    if not (hotel_overlay.get("key") or hotel_overlay.get("token")):
+        hotel_overlay.pop("key", None)
+        hotel_overlay.pop("token", None)
+        # Keep official/env key when the hotel only saved an OTA account and password.
+    merged.update(hotel_overlay)
     if row:
         if row.platform_hotel_id and not merged.get("platform_hotel_id"):
             merged["platform_hotel_id"] = row.platform_hotel_id
         if row.platform_account_id and not merged.get("platform_account_id"):
             merged["platform_account_id"] = row.platform_account_id
+        if stored.get("account") and not merged.get("platform_account_id"):
+            merged["platform_account_id"] = stored["account"]
     return merged
 
 
 def has_usable_credentials(creds: dict[str, str]) -> bool:
-    return bool((creds.get("key") or creds.get("token") or "").strip())
+    if (creds.get("key") or creds.get("token") or "").strip():
+        return True
+    account = (
+        creds.get("account")
+        or creds.get("username")
+        or creds.get("platform_account_id")
+        or ""
+    ).strip()
+    password = (creds.get("password") or creds.get("secret") or "").strip()
+    return bool(account and password)
+
+
+HOTEL_FORBIDDEN_FIELDS = (
+    "key", "secret", "token", "session", "password", "account", "username",
+    "credentials_encrypted", "write_key", "write_secret", "api_key", "api_secret",
+    "official_api_key", "official_api_secret", "headers", "auth_header", "key_header",
+    "request_template", "contract", "base_url", "contract_host", "contract_hosts",
+    "contract_source", "contract_removable", "write_flag_enabled", "live_ready",
+    "platform_hotel_id", "platform_account_id", "adapter", "adapters", "auth",
+    "contract_path", "source_path", "path", "has_server_credentials",
+    "has_official_credentials", "write_flag_source",
+)
+
+HOTEL_CONNECT_HINT = "酒店只需授权本店 OTA 账号和密码；官方契约和接口由运维端配置。打开 live 仍要等契约已启用。"
+
+OPS_CRED_SETTING_PREFIX = "official_api_creds_"
+
+
+def official_creds_setting_key(platform: str, hotel_id: int) -> str:
+    return f"hotel:{int(hotel_id)}:{OPS_CRED_SETTING_PREFIX}{platform.lower()}"
+
+
+def load_official_api_credentials(db: Session | None, hotel_id: int | None, platform: str) -> dict[str, str]:
+    if db is None or hotel_id is None:
+        return {}
+    row = db.get(SystemSetting, official_creds_setting_key(platform, hotel_id))
+    if row is None or not row.value:
+        return {}
+    return decrypt_credentials(row.value)
+
+
+def save_official_api_credentials(db: Session, hotel_id: int, platform: str, payload: dict) -> dict[str, str]:
+    stored = load_official_api_credentials(db, hotel_id, platform)
+    mapping = {
+        "key": payload.get("key") or payload.get("api_key") or payload.get("write_key"),
+        "secret": payload.get("secret") or payload.get("api_secret") or payload.get("write_secret"),
+        "token": payload.get("token"),
+        "session": payload.get("session"),
+    }
+    for field, value in mapping.items():
+        if field in payload and payload[field] is not None and str(payload[field]) == "":
+            stored.pop(field, None)
+        elif value is not None and str(value).strip():
+            stored[field] = str(value).strip()
+    key = official_creds_setting_key(platform, hotel_id)
+    raw = encrypt_credentials(stored)
+    row = db.get(SystemSetting, key)
+    if not raw:
+        if row is not None:
+            db.delete(row)
+            db.commit()
+        return {}
+    if row is None:
+        db.add(SystemSetting(key=key, value=raw))
+    else:
+        row.value = raw
+        row.updated_at = _now()
+    db.commit()
+    return stored
+
+
+def sanitize_hotel_error(message: str | None) -> str:
+    text = (message or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"https?://\S+", "官方接口", text)
+    text = re.sub(r"(?i)\b[A-Z0-9_]*OFFICIAL_CONTRACT[A-Z0-9_]*\b", "官方契约配置", text)
+    text = re.sub(r"(?i)\b[A-Z0-9_]+_WRITE_(ENABLED|KEY|SECRET)\b", "写入配置", text)
+    text = re.sub(r"(?i)(/[\w.-]+)+\.(json|pem|env|txt|key)", "服务器文件", text)
+    return text
+
+
+def strip_hotel_channel_fields(body: dict) -> dict:
+    for forbidden in HOTEL_FORBIDDEN_FIELDS:
+        body.pop(forbidden, None)
+    return body
 
 
 @dataclass
@@ -133,9 +231,9 @@ def resolve_live_write_context(db: Session | None, hotel_id: int | None, platfor
             .filter(ChannelConnection.hotel_id == hotel_id, ChannelConnection.platform == platform)
             .one_or_none()
         )
-    creds = merged_credentials(row, platform)
+    creds = merged_credentials(row, platform, db, hotel_id)
     contract = load_official_contract(platform, db, hotel_id=hotel_id)
-    write_enabled = platform_write_enabled(platform)
+    write_enabled = platform_write_enabled(platform, db, hotel_id)
     has_creds = has_usable_credentials(creds)
     authorized = bool(row and row.status == STATUS_AUTHORIZED and has_creds)
     if not authorized and has_creds and row is None:
@@ -176,6 +274,37 @@ def resolve_live_write_context(db: Session | None, hotel_id: int | None, platfor
 
 
 def public_channel(db: Session, hotel_id: int, platform: str) -> dict[str, Any]:
+    """Hotel-facing channel status. Never includes hosts, sources, secrets, or write-flag names."""
+    platform = platform.lower()
+    row = (
+        db.query(ChannelConnection)
+        .filter(ChannelConnection.hotel_id == hotel_id, ChannelConnection.platform == platform)
+        .one_or_none()
+    )
+    contract = load_official_contract(platform, db, hotel_id=hotel_id)
+    stored = decrypt_credentials(row.credentials_encrypted if row else "")
+    configured = contract_is_configured(contract)
+    actions = list((contract or {}).get("actions") or {}) if configured else []
+    labels = public_action_labels(actions)
+    status = row.status if row else STATUS_DISCONNECTED
+    body = {
+        "platform": platform,
+        "label": PLATFORM_LABELS.get(platform, platform),
+        "status": status,
+        "authorized_at": row.authorized_at.isoformat() if row and row.authorized_at else None,
+        "last_verified": row.last_verified.isoformat() if row and row.last_verified else None,
+        "has_credentials": has_usable_credentials(stored),
+        "contract_enabled": configured,
+        "open_actions": labels,
+        "supported_actions": labels,
+        "last_error": sanitize_hotel_error((row.last_error if row else "") or ""),
+        "connect_hint": HOTEL_CONNECT_HINT,
+    }
+    return strip_hotel_channel_fields(body)
+
+
+def ops_public_channel(db: Session, hotel_id: int, platform: str) -> dict[str, Any]:
+    """Operator view: may include contract host/source and write-flag state, never secrets."""
     platform = platform.lower()
     row = (
         db.query(ChannelConnection)
@@ -185,13 +314,13 @@ def public_channel(db: Session, hotel_id: int, platform: str) -> dict[str, Any]:
     contract = load_official_contract(platform, db, hotel_id=hotel_id)
     env = env_credentials(platform)
     stored = decrypt_credentials(row.credentials_encrypted if row else "")
-    creds = merged_credentials(row, platform)
-    has_stored = has_usable_credentials(stored)
-    has_env = has_usable_credentials(env)
-    write_flag = platform_write_enabled(platform)
+    official = load_official_api_credentials(db, hotel_id, platform)
+    creds = merged_credentials(row, platform, db, hotel_id)
+    write_flag = platform_write_enabled(platform, db, hotel_id)
     configured = contract_is_configured(contract)
     contract_meta = public_contract_status(platform, db, hotel_id=hotel_id)
-    actions = contract_meta.get("supported_actions") or []
+    action_ids = contract_meta.get("supported_actions") or []
+    labels = contract_meta.get("action_labels") or public_action_labels(action_ids)
     status = row.status if row else STATUS_DISCONNECTED
     live_ready = (
         status == STATUS_AUTHORIZED
@@ -199,31 +328,44 @@ def public_channel(db: Session, hotel_id: int, platform: str) -> dict[str, Any]:
         and write_flag
         and configured
     )
-    return {
+    body = {
+        "hotel_id": hotel_id,
         "platform": platform,
         "label": PLATFORM_LABELS.get(platform, platform),
         "status": status,
         "authorized_at": row.authorized_at.isoformat() if row and row.authorized_at else None,
         "last_verified": row.last_verified.isoformat() if row and row.last_verified else None,
-        "platform_hotel_id": (row.platform_hotel_id if row else "") or env.get("platform_hotel_id") or "",
-        "platform_account_id": (row.platform_account_id if row else "") or "",
-        "has_credentials": has_stored or has_env,
-        "has_server_credentials": has_env,
-        "contract_configured": contract_meta["contract_configured"],
+        "has_hotel_credentials": has_usable_credentials(stored),
+        "has_official_credentials": has_usable_credentials(official) or has_usable_credentials(env),
+        "contract_enabled": configured,
+        "contract_configured": configured,
         "contract_source": contract_meta["contract_source"],
         "contract_removable": contract_meta["contract_removable"],
         "contract_host": contract_meta["contract_host"],
         "contract_hosts": contract_meta["contract_hosts"],
+        "supported_actions": action_ids,
+        "action_labels": labels,
+        "open_actions": labels,
         "write_flag_enabled": write_flag,
         "live_ready": live_ready,
-        "last_error": (row.last_error if row else "") or "",
-        "supported_actions": actions,
-        "connect_hint": "密钥仅保存在服务器，保存后不再回显。没有官方契约或写入开关时，live 模式会拒绝写入且不会出站。仓库内示例契约不会自动加载，生产 URL 必须来自合作方。",
+        "last_error": sanitize_hotel_error((row.last_error if row else "") or ""),
+        "connect_hint": "官方契约、接口地址和写入开关在运维端配置；酒店只需授权本店 OTA 账号和密码。安装契约本身不会发起出站写入。示例契约不会自动加载，本仓库不编造生产 URL。",
     }
+    for forbidden in (
+        "key", "secret", "token", "session", "password", "account", "username",
+        "credentials_encrypted", "write_key", "write_secret", "api_key", "api_secret",
+        "contract", "headers", "auth_header", "key_header", "request_template", "base_url",
+    ):
+        body.pop(forbidden, None)
+    return body
 
 
 def list_public_channels(db: Session, hotel_id: int) -> list[dict[str, Any]]:
     return [public_channel(db, hotel_id, platform) for platform in PLATFORMS]
+
+
+def list_ops_channels(db: Session, hotel_id: int) -> list[dict[str, Any]]:
+    return [ops_public_channel(db, hotel_id, platform) for platform in PLATFORMS]
 
 
 def _secret_fields(payload: dict) -> dict[str, str]:
@@ -247,8 +389,24 @@ def save_channel_connection(db: Session, hotel_id: int, platform: str, payload: 
         row.platform_account_id = str(payload["platform_account_id"]).strip()
 
     stored = decrypt_credentials(row.credentials_encrypted)
+    account = payload.get("account") if "account" in payload else payload.get("username") if "username" in payload else None
+    if account is not None:
+        value = str(account).strip()
+        if value:
+            stored["account"] = value
+            if not row.platform_account_id:
+                row.platform_account_id = value
+        else:
+            stored.pop("account", None)
+    if "password" in payload and payload["password"] is not None:
+        if str(payload["password"]) == "":
+            stored.pop("password", None)
+        else:
+            stored["password"] = str(payload["password"])
+
     provided = _secret_fields(payload)
     # Empty string on a secret field means "clear this field". Omitted means keep.
+    # Kept for backward compatibility with previously stored key/secret/account ids.
     for field in ("key", "secret", "session", "token"):
         if field in payload and payload[field] is not None and str(payload[field]) == "":
             stored.pop(field, None)
@@ -260,7 +418,8 @@ def save_channel_connection(db: Session, hotel_id: int, platform: str, payload: 
         stored["platform_account_id"] = row.platform_account_id
 
     row.credentials_encrypted = encrypt_credentials(stored)
-    if has_usable_credentials(stored) or has_usable_credentials(merged_credentials(row, platform)):
+    usable = has_usable_credentials(stored) or has_usable_credentials(merged_credentials(row, platform, db, hotel_id))
+    if usable:
         row.status = STATUS_AUTHORIZED
         if row.authorized_at is None:
             row.authorized_at = _now()
@@ -268,7 +427,7 @@ def save_channel_connection(db: Session, hotel_id: int, platform: str, payload: 
     else:
         row.status = STATUS_CREDENTIALS_MISSING
         row.authorized_at = None
-        row.last_error = "已保存连接，但还没有可用的密钥。"
+        row.last_error = "已保存连接，但还没有可用的账号和密码。"
     row.updated_at = _now()
     db.commit()
     db.refresh(row)
@@ -317,7 +476,7 @@ def verify_channel(db: Session, hotel_id: int, platform: str) -> dict[str, Any]:
     ctx = resolve_live_write_context(db, hotel_id, platform)
     if not ctx.has_credentials:
         row.status = STATUS_CREDENTIALS_MISSING
-        row.last_error = "还没有可用的密钥，无法校验。"
+        row.last_error = "还没有可用的账号和密码，无法校验。"
         row.updated_at = _now()
         db.commit()
         return public_channel(db, hotel_id, platform)
@@ -337,7 +496,7 @@ def verify_channel(db: Session, hotel_id: int, platform: str) -> dict[str, Any]:
             row.last_error = (
                 ""
                 if contract_is_configured(contract)
-                else "凭证已保存，但未配置官方契约，无法向官方接口做连通性校验。live 写入会被拒绝，本次未发起外部请求。"
+                else "账号已保存，但运维端尚未启用官方契约，无法向官方接口做连通性校验。live 写入会被拒绝，本次未发起外部请求。"
             )
         row.updated_at = _now()
         db.commit()

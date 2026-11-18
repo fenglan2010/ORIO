@@ -1,5 +1,5 @@
 import { createRouter, createWebHashHistory } from "vue-router";
-import { getToken, setToken, api } from "../api/client";
+import { getToken, getScope, setToken, api } from "../api/client";
 import { shellState, clearShellMe } from "../utils/shellState";
 import { can, firstAllowedPath, routeCapability } from "../utils/permissions";
 import Login from "../views/Login.vue";
@@ -11,11 +11,15 @@ import Autonomy from "../views/Autonomy.vue";
 import Evolution from "../views/Evolution.vue";
 import Audit from "../views/Audit.vue";
 import Settings from "../views/Settings.vue";
+import OpsLogin from "../views/OpsLogin.vue";
+import OpsConsole from "../views/OpsConsole.vue";
 
 const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: "/login", component: Login, meta: { public: true } },
+    { path: "/ops/login", component: OpsLogin, meta: { public: true, ops: true } },
+    { path: "/ops", component: OpsConsole, meta: { ops: true, title: "运维端" } },
     { path: "/alerts", redirect: { path: "/dashboard", query: { focus: "alerts" } } },
     { path: "/strategies", redirect: "/analysis" },
     { path: "/reviews", redirect: { path: "/execution", query: { tab: "reviews" } } },
@@ -52,11 +56,23 @@ async function ensureMe() {
 }
 
 router.beforeEach(async (to) => {
+  if (to.meta.ops) {
+    if (to.path === "/ops/login") {
+      if (getToken() && getScope() === "ops") return "/ops";
+      return true;
+    }
+    if (!getToken() || getScope() !== "ops") return "/ops/login";
+    return true;
+  }
   if (to.meta.public) {
-    if (to.path === "/login" && getToken()) return "/dashboard";
+    if (to.path === "/login" && getToken()) {
+      if (getScope() === "ops") return "/ops";
+      return "/dashboard";
+    }
     return true;
   }
   if (!getToken()) return "/login";
+  if (getScope() === "ops") return "/ops";
   try {
     const me = await ensureMe();
     const cap = to.meta.capability || routeCapability(to.path);

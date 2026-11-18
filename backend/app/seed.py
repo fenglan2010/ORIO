@@ -28,6 +28,7 @@ from app.models import (
     CompetitorSnapshot,
     DailyMetric,
     Hotel,
+    HotelMembership,
     Review,
     RoomType,
     SystemSetting,
@@ -69,6 +70,38 @@ DEMO_ACCOUNTS = (
     ("analyst", "analyst123", "运营观察", "analyst"),
 )
 
+# Distinct operator login. Not a hotel tenant account and not shown in hotel Settings.
+OPS_ACCOUNT = ("ops", "ops123", "运维管理员", "operator")
+
+
+
+def seed_ops_user(db: Session) -> User:
+    """Ensure a distinct operator account exists, with no hotel membership."""
+    username, password, display_name, role = OPS_ACCOUNT
+    user = db.query(User).filter(User.username == username).one_or_none()
+    if user is None:
+        user = User(
+            username=username,
+            password_hash=hash_password(password),
+            display_name=display_name,
+            role=role,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    else:
+        if user.role != role:
+            user.role = role
+        if user.display_name in {"", None}:
+            user.display_name = display_name
+        if getattr(user, "disabled", False):
+            user.disabled = False
+            user.disabled_at = None
+        db.commit()
+        db.refresh(user)
+    db.query(HotelMembership).filter(HotelMembership.user_id == user.id).delete(synchronize_session=False)
+    db.commit()
+    return user
 
 def seed_users(db: Session) -> User:
     """Ensure the four demo accounts exist. Promote the historical admin role.
@@ -772,6 +805,7 @@ def seed_settings(db: Session) -> None:
 def seed_all(db: Session, today: date | None = None) -> Hotel:
     today = today or date.today()
     seed_users(db)
+    seed_ops_user(db)
     hotel = seed_hotel(db)
     bind_hotel_a_memberships(db, hotel)
     migrate_legacy_settings(db, hotel.id)

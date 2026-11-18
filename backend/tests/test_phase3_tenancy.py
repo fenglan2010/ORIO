@@ -192,6 +192,7 @@ def test_hotel_b_cannot_change_hotel_a_policy_or_users(client):
         assert db.get(SystemSetting, f"hotel:{hotel_a.id}:official_contract_ctrip") is None
         assert db.get(SystemSetting, f"hotel:{hotel_b.id}:official_contract_ctrip") is None
         for ch in after_a["channels"] + after_b["channels"]:
-            assert ch["contract_configured"] is False
+            assert ch["contract_enabled"] is False
+            assert "contract_host" not in ch
     finally:
         db.close()

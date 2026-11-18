@@ -17,7 +17,7 @@
     <p v-if="saved" class="notice notice-ok">{{ saved }}</p>
 
     <div class="notice" style="margin-bottom:16px">
-      默认关闭，行为与第一阶段相同。开启后，只有最终风险为低、入住窗口不含法定节假日、调价幅度低于阈值（默认 15%）的方案会自动执行；中高风险、活动报名和评价回复仍进入人审队列。默认写入是官方沙盒回执。只有渠道已授权、官方契约和写入开关齐全时，live 才会出站。自动执行会留下 <code>system:auto_execute</code> 审计、执行前检查点，并可按原路径回滚。
+      默认关闭，行为与第一阶段相同。开启后，只有最终风险为低、入住窗口不含法定节假日、调价幅度低于阈值（默认 15%）的方案会自动执行；中高风险、活动报名和评价回复仍进入人审队列。默认写入是官方沙盒回执。酒店只需授权本店 OTA 账号和密码；官方契约和接口由运维端配置。只有渠道已授权、运维端已启用官方契约并打开写入开关时，live 才会出站。自动执行会留下 <code>system:auto_execute</code> 审计、执行前检查点，并可按原路径回滚。
     </div>
 
     <div class="grid-2">
@@ -120,7 +120,7 @@
     <div class="space"></div>
     <div class="card card-pad">
       <ChannelConnections :items="channels" compact @refresh="load" />
-      <p class="muted" style="margin:8px 0 0">完整连接与密钥保存请到 <router-link class="link" to="/settings?section=ota">设置 · 渠道连接</router-link>。</p>
+      <p class="muted" style="margin:8px 0 0">完整的本店 OTA 账号授权请到 <router-link class="link" to="/settings?section=ota">设置 · 渠道连接</router-link>。官方契约由运维端配置。</p>
     </div>
     <div class="space"></div>
     <WriteMonitor :items="writes" @refresh="load" />

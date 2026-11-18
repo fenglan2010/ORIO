@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_hotel
-from app.auth import create_token, get_current_user, verify_password
+from app.auth import create_token, get_current_user, is_operator_user, verify_password
 from app.database import get_db
 from app.models import Hotel, User
 from app.schemas import LoginRequest, TokenResponse, UserMe
@@ -21,6 +21,8 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     if getattr(user, "disabled", False):
         raise HTTPException(status_code=401, detail="账号已停用，无法登录")
+    if is_operator_user(user):
+        raise HTTPException(status_code=403, detail="这是运维账号，请从运维端登录")
     hotel = resolve_current_hotel(db, user, login_hotel_id=body.hotel_id)
     membership = membership_for(db, user.id, hotel.id)
     role = membership.role if membership else user.role

@@ -15,13 +15,8 @@ from app.services.channels import (
     list_public_channels,
     public_channel,
     save_channel_connection,
+    strip_hotel_channel_fields,
     verify_channel,
-)
-from app.adapters.ota.official_http import ContractValidationError
-from app.services.official_contracts import (
-    install_official_contract,
-    uninstall_official_contract,
-    validation_report,
 )
 from app.services.workflow import write_audit
 
@@ -29,9 +24,13 @@ router = APIRouter(prefix="/api/channels", tags=["channels"], dependencies=[Depe
 
 
 class ChannelConnectBody(BaseModel):
+    account: str | None = Field(default=None, description="OTA account; omitted keeps the stored value, empty clears it.")
+    password: str | None = Field(default=None, description="OTA password; omitted keeps the stored value, empty clears it.")
+    username: str | None = Field(default=None, description="Alias for account.")
+    # Backward-compatible aliases for previously stored key/secret/account ids.
     platform_hotel_id: str | None = None
     platform_account_id: str | None = None
-    key: str | None = Field(default=None, description="Write key; omitted keeps the stored value, empty clears it.")
+    key: str | None = None
     secret: str | None = None
     session: str | None = None
 
@@ -44,14 +43,7 @@ def _platform(platform: str) -> str:
 
 
 def _public(db: Session, hotel: Hotel, platform: str) -> dict:
-    body = public_channel(db, hotel.id, platform)
-    for forbidden in (
-        "key", "secret", "token", "session", "credentials_encrypted",
-        "write_key", "write_secret", "api_key", "api_secret",
-        "contract", "headers", "auth_header", "key_header", "request_template",
-    ):
-        body.pop(forbidden, None)
-    return body
+    return strip_hotel_channel_fields(public_channel(db, hotel.id, platform))
 
 
 @router.get("")
@@ -88,10 +80,8 @@ def connect_channel(
             "platform": platform,
             "status": row.status,
             "has_credentials": bool(row.credentials_encrypted),
-            "platform_hotel_id": row.platform_hotel_id,
-            "platform_account_id": row.platform_account_id,
         },
-        reason="保存渠道连接（密钥不写入审计）",
+        reason="保存渠道连接（账号密码不写入审计）",
     )
     return _public(db, hotel, platform)
 
@@ -138,51 +128,34 @@ def disconnect(
     return _public(db, hotel, platform)
 
 
+def _hotel_contract_forbidden() -> HTTPException:
+    return HTTPException(status_code=403, detail="官方契约由运维端配置，酒店账号不能校验、安装或卸载。")
+
+
 @router.post("/{platform}/contract/validate")
 def validate_contract(
     platform: str,
-    body: dict,
-    user: User = Depends(require("manage_channels")),
+    body: dict | None = None,
+    user: User = Depends(get_current_user),
 ):
-    """Schema-check a contract JSON. Does not persist and does not open a socket."""
-    report = validation_report(body, _platform(platform))
-    if not report["valid"]:
-        raise HTTPException(status_code=400, detail="；".join(report["errors"] or [report["message"]]))
-    return report
+    _platform(platform)
+    raise _hotel_contract_forbidden()
 
 
 @router.put("/{platform}/contract")
 def put_contract(
     platform: str,
-    body: dict,
-    db: Session = Depends(get_db),
-    hotel: Hotel = Depends(current_hotel),
-    user: User = Depends(require("manage_channels")),
+    body: dict | None = None,
+    user: User = Depends(get_current_user),
 ):
-    platform = _platform(platform)
-    try:
-        result = install_official_contract(db, platform, body, actor=user.username, hotel_id=hotel.id)
-    except ContractValidationError as exc:
-        raise HTTPException(status_code=400, detail="；".join(exc.errors or [exc.message])) from exc
-    public = _public(db, hotel, platform)
-    public.update({k: result[k] for k in result if k not in public})
-    return public
+    _platform(platform)
+    raise _hotel_contract_forbidden()
 
 
 @router.delete("/{platform}/contract")
 def delete_contract(
     platform: str,
-    db: Session = Depends(get_db),
-    hotel: Hotel = Depends(current_hotel),
-    user: User = Depends(require("manage_channels")),
+    user: User = Depends(get_current_user),
 ):
-    platform = _platform(platform)
-    try:
-        result = uninstall_official_contract(db, platform, actor=user.username, hotel_id=hotel.id)
-    except PermissionError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    public = _public(db, hotel, platform)
-    public.update({k: result[k] for k in result if k not in public})
-    return public
+    _platform(platform)
+    raise _hotel_contract_forbidden()

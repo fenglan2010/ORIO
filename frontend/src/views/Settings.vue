@@ -2,7 +2,7 @@
     <div class="page-head">
       <div>
         <h1>系统设置</h1>
-        <p>管理账号、角色权限、酒店信息、渠道连接与显示偏好。PMS 集成为后续阶段。</p>
+        <p>管理账号、角色权限、酒店信息、渠道连接与显示偏好。酒店只需授权本店 OTA 账号和密码；官方契约和接口由运维端配置。PMS 集成为后续阶段。</p>
       </div>
     </div>
     <p v-if="error" class="error">{{ error }}</p>
@@ -148,7 +148,7 @@
           <div class="subcard" style="background:var(--primary-soft)">
             <b>执行策略</b>
             <p v-if="!can('update_policy')" class="muted">仅酒店管理员可以修改执行策略，避免收益经理自行打开 live 或自动执行。</p>
-            <p style="margin:6px 0">默认关闭自动执行，行为与第一阶段相同：调价、活动和评价回复都要人审。开启后，仅低风险、非节假日、调价幅度低于阈值的方案可自动执行；中高风险和评价回复仍必须人审。默认写入为官方沙盒回执。若改为 live，须渠道已授权、服务器已配置官方契约并打开写入开关，否则会拒绝且不会出站。评价回复仍不会自动对外发布。</p>
+            <p style="margin:6px 0">默认关闭自动执行，行为与第一阶段相同：调价、活动和评价回复都要人审。开启后，仅低风险、非节假日、调价幅度低于阈值的方案可自动执行；中高风险和评价回复仍必须人审。默认写入为官方沙盒回执。酒店只需授权本店 OTA 账号和密码；官方契约和接口由运维端配置。若改为 live，须渠道已授权且运维端已启用官方契约并打开写入开关，否则会拒绝且不会出站。评价回复仍不会自动对外发布。</p>
             <div class="row" style="justify-content:space-between;margin:10px 0">
               <div>
                 <b>低风险自动执行</b>
@@ -188,9 +188,9 @@
                 <label>写入模式</label>
                 <select v-model="policy.write_mode" :disabled="!can('update_policy')">
                   <option value="sandbox">官方沙盒（默认）</option>
-                  <option value="live">live（需授权、契约与写入开关）</option>
+                  <option value="live">live（需授权，且运维端已启用契约与写入开关）</option>
                 </select>
-                <div class="muted">演示默认沙盒。没有官方契约时 live 会安全拒绝。</div>
+                <div class="muted">演示默认沙盒。打开 live 仍要等运维端已启用官方契约，否则会安全拒绝。</div>
               </div>
             </div>
             <div class="row" style="margin-top:12px">

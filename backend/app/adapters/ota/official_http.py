@@ -56,15 +56,77 @@ def _settings_flag(settings, name: str, default=False):
     return getattr(settings, name, default)
 
 
-def platform_write_enabled(platform: str) -> bool:
+WRITE_TRUE = {"1", "true", "yes", "on"}
+WRITE_FALSE = {"0", "false", "no", "off"}
+
+ACTION_LABELS = {
+    "apply_price": "调价",
+    "update_price": "调价",
+    "update_rates": "调价",
+    "rates_increment": "调价",
+    "rate_update": "调价",
+    "campaign": "活动",
+    "apply_campaign": "活动",
+    "enroll_campaign": "活动",
+    "signup_campaign": "活动",
+    "verify": "连通校验",
+    "review_reply": "评价回复",
+    "fetch_metrics": "采集",
+    "ingest": "采集",
+}
+
+
+def action_label(name: str) -> str:
+    key = (name or "").strip()
+    return ACTION_LABELS.get(key, key)
+
+
+def public_action_labels(actions) -> list[str]:
+    labels: list[str] = []
+    for name in actions or []:
+        label = action_label(str(name))
+        if label and label not in labels:
+            labels.append(label)
+    return labels
+
+
+def write_flag_setting_key(platform: str, hotel_id: int) -> str:
+    return f"hotel:{int(hotel_id)}:{platform_env_prefix(platform)}_write_enabled"
+
+
+def platform_write_enabled(platform: str, db=None, hotel_id: int | None = None) -> bool:
     platform = platform_env_prefix(platform)
     settings = get_settings()
     enabled = bool(_settings_flag(settings, f"{platform}_write_enabled", False))
     raw = os.environ.get(f"{platform.upper()}_WRITE_ENABLED", "").strip().lower()
-    if raw in {"1", "true", "yes", "on"}:
+    if raw in WRITE_TRUE:
         return True
-    if raw in {"0", "false", "no", "off"}:
+    if raw in WRITE_FALSE:
         return False
+    if enabled:
+        return True
+    if db is not None and hotel_id is not None:
+        from app.models import SystemSetting
+
+        row = db.get(SystemSetting, write_flag_setting_key(platform, hotel_id))
+        if row and str(row.value or "").strip().lower() in WRITE_TRUE:
+            return True
+    return False
+
+
+def set_platform_write_enabled(db, hotel_id: int, platform: str, enabled: bool) -> bool:
+    from datetime import datetime
+    from app.models import SystemSetting
+
+    key = write_flag_setting_key(platform, hotel_id)
+    value = "true" if enabled else "false"
+    row = db.get(SystemSetting, key)
+    if row is None:
+        db.add(SystemSetting(key=key, value=value))
+    else:
+        row.value = value
+        row.updated_at = datetime.utcnow()
+    db.commit()
     return enabled
 
 
@@ -386,6 +448,8 @@ def public_contract_status(platform: str, db=None, hotel_id: int | None = None) 
         "contract_host": hosts[0] if hosts else "",
         "contract_hosts": hosts,
         "supported_actions": list((contract or {}).get("actions") or {}) if configured else [],
+        "action_labels": public_action_labels(list((contract or {}).get("actions") or {}) if configured else []),
+        "contract_enabled": configured,
     }
 
 
@@ -437,8 +501,15 @@ def _build_headers(contract: dict, spec: dict, credentials: dict, body: bytes) -
         if isinstance(source, dict):
             headers.update({str(k): str(v) for k, v in source.items()})
     scheme = str(spec.get("auth") or contract.get("auth") or "header_api_key").strip().lower()
-    key = credentials.get("key") or credentials.get("token") or ""
-    secret = credentials.get("secret") or ""
+    key = (
+        credentials.get("key")
+        or credentials.get("token")
+        or credentials.get("account")
+        or credentials.get("username")
+        or credentials.get("platform_account_id")
+        or ""
+    )
+    secret = credentials.get("secret") or credentials.get("password") or ""
     header_name = str(spec.get("auth_header") or contract.get("auth_header") or "").strip()
     if scheme in {"none", "off"}:
         return headers

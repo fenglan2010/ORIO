@@ -11,6 +11,7 @@ ROLE_ADMIN = "admin"
 ROLE_REVENUE_MANAGER = "revenue_manager"
 ROLE_APPROVER = "approver"
 ROLE_ANALYST = "analyst"
+ROLE_OPERATOR = "operator"
 
 ROLES = (ROLE_ADMIN, ROLE_REVENUE_MANAGER, ROLE_APPROVER, ROLE_ANALYST)
 
@@ -19,6 +20,7 @@ ROLE_LABELS = {
     ROLE_REVENUE_MANAGER: "收益经理",
     ROLE_APPROVER: "调价审批人",
     ROLE_ANALYST: "运营观察",
+    ROLE_OPERATOR: "运维管理员",
 }
 
 # Capability flags used by APIs and the frontend.

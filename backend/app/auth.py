@@ -36,7 +36,16 @@ def verify_password(password: str, stored: str) -> bool:
     return hmac.compare_digest(dk.hex(), digest)
 
 
-def create_token(user: User, hotel_id: int | None = None) -> str:
+SCOPE_HOTEL = "hotel"
+SCOPE_OPS = "ops"
+ROLE_OPERATOR = "operator"
+
+
+def is_operator_user(user: User | None) -> bool:
+    return bool(user is not None and getattr(user, "role", "") == ROLE_OPERATOR)
+
+
+def create_token(user: User, hotel_id: int | None = None, *, scope: str = SCOPE_HOTEL) -> str:
     settings = get_settings()
     now = datetime.now(timezone.utc)
     payload = {
@@ -44,6 +53,7 @@ def create_token(user: User, hotel_id: int | None = None) -> str:
         "username": user.username,
         "exp": now + timedelta(hours=settings.jwt_expire_hours),
         "iat": now,
+        "scope": scope,
     }
     if hotel_id is not None:
         payload["hotel_id"] = int(hotel_id)
@@ -70,4 +80,28 @@ def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
     if getattr(user, "disabled", False):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号已停用")
+    if payload.get("scope") == SCOPE_OPS or is_operator_user(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="运维账号不能访问酒店端")
+    return user
+
+
+def get_current_operator(
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+    db: Session = Depends(get_db),
+) -> User:
+    if creds is None or creds.scheme.lower() != "bearer":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录")
+    try:
+        payload = decode_token(creds.credentials)
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录已失效")
+    if payload.get("scope") != SCOPE_OPS:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="请使用运维账号登录")
+    user = db.get(User, int(payload["sub"]))
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
+    if getattr(user, "disabled", False):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号已停用")
+    if not is_operator_user(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="请使用运维账号登录")
     return user

@@ -107,7 +107,7 @@ def install_official_contract(db: Session, platform: str, body: Any, *, actor: s
 def uninstall_official_contract(db: Session, platform: str, *, actor: str, hotel_id: int) -> dict[str, Any]:
     current = inspect_official_contract(platform, db, hotel_id=hotel_id)
     if current.get("source") == "env_file":
-        raise PermissionError("当前官方契约由服务器文件（环境变量或契约目录）管理，不能从酒店界面卸载，也不会删除该文件。")
+        raise PermissionError("当前官方契约由服务器文件（环境变量或契约目录）管理，不能从运维端卸载，也不会删除该文件。")
     key = setting_key_for(platform, hotel_id)
     row = db.get(SystemSetting, key)
     if current.get("source") != "settings" and row is None:

@@ -5,7 +5,7 @@
       <span class="muted" style="font-weight:500">{{ headerHint }}</span>
     </div>
     <p class="muted" style="margin-top:0">
-      这里跟踪每次调价、活动报名和评价回复的写入账本：回执模式、平台、官方回执号、尝试次数和对账结果。默认成功路径是官方沙盒回执。超时和 HTTP 5xx 可重试，最多 {{ maxAttempts }} 次；缺少凭证、契约或授权，以及 HTTP 4xx，不能当网络错误重试。评价回复不会自动对外发布。
+      这里跟踪每次调价、活动报名和评价回复的写入账本：回执模式、平台、官方回执号、尝试次数和对账结果。默认成功路径是官方沙盒回执。酒店只需授权本店 OTA 账号和密码；官方契约和接口由运维端配置。超时和 HTTP 5xx 可重试，最多 {{ maxAttempts }} 次；缺少账号授权、尚未启用契约，以及 HTTP 4xx，不能当网络错误重试。评价回复不会自动对外发布。
     </p>
     <div v-if="jobStatus" class="muted" style="margin:0 0 10px">
       最近采集 {{ formatRunTime(jobStatus.last_ingested_at || jobStatus.last_ingest) }}<span v-if="ingestHint"> · {{ ingestHint }}</span>

@@ -1260,3 +1260,19 @@ html[data-theme="dark"] .bipolar-track::before { background: #3a4248; }
 .findings { margin: 10px 0 0; padding-left: 18px; font-size: 13px; line-height: 1.55; color: var(--text); }
 .findings li { margin: 4px 0; }
 .room-pressure { margin-top: 10px; }
+
+
+.ops-page {
+  min-height: 100vh;
+  padding: 20px 24px 40px;
+  max-width: 1080px;
+  margin: 0 auto;
+  background: var(--bg, #f5f6f8);
+}
+.ops-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}

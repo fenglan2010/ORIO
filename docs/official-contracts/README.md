@@ -12,8 +12,8 @@
 
 1. 环境变量 `OIRO_OFFICIAL_CONTRACT_CTRIP` / `_MEITUAN` / `_FLIGGY` 指向的 JSON 文件
 2. 目录 `OIRO_OFFICIAL_CONTRACT_DIR/{platform}.json`
-3. 服务器配置项 `official_contract_{platform}`（可由酒店管理员在设置「渠道连接」中校验后安装或卸载）
+3. 服务器配置项 `hotel:{id}:official_contract_{platform}`（由运维端校验后安装或卸载；酒店账号不能安装契约）
 
-由环境变量或目录管理的契约不能从酒店界面删除，也不会删除服务器上的文件。公开状态只展示是否已配置、来源、主机名和支持的动作，不回显密钥或契约全文。
+由环境变量或目录管理的契约不能从运维端删除，也不会删除服务器上的文件。酒店侧只展示契约是否已启用和已开放动作，不展示主机名或来源。运维端可以看到来源、主机名和支持的动作，仍不回显密钥或契约全文。
 
 契约必须包含：`platform`、`auth`、至少一个含 `method` / `path` 的动作，以及 `base_url`（可写在根上或动作上）。非本机地址必须是 https；本机测试可用 `http://127.0.0.1` 或 `localhost`。生产环境 URL 必须来自合作方正式契约，本仓库不编造携程/美团/飞猪写入路径。

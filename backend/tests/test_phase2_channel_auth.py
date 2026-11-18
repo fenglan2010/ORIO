@@ -149,7 +149,7 @@ def _connect_ctrip(client, headers, *, key="test-live-key"):
     resp = client.put(
         "/api/channels/ctrip",
         headers=headers,
-        json={"platform_hotel_id": "htl-demo-001", "platform_account_id": "acc-demo", "key": key, "secret": "super-secret-do-not-echo"},
+        json={"account": key, "password": "super-secret-do-not-echo"},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -171,9 +171,11 @@ def test_demo_defaults_stay_sandbox_and_auto_off(client, auth_header):
     assert set(channels) == {"ctrip", "meituan", "fliggy"}
     for ch in channels.values():
         assert ch["status"] == "disconnected"
-        assert ch["contract_configured"] is False
-        assert ch["write_flag_enabled"] is False
-        assert ch["live_ready"] is False
+        assert ch["contract_enabled"] is False
+        assert "write_flag_enabled" not in ch
+        assert "live_ready" not in ch
+        assert "contract_host" not in ch
+        assert "contract_source" not in ch
 
 
 def test_credentials_never_appear_in_settings_or_channel_get(client, auth_header):
@@ -181,7 +183,7 @@ def test_credentials_never_appear_in_settings_or_channel_get(client, auth_header
     saved = client.put(
         "/api/channels/meituan",
         headers=auth_header,
-        json={"platform_hotel_id": "mt-100", "key": secret, "secret": secret},
+        json={"account": "mt-100", "password": secret},
     )
     assert saved.status_code == 200, saved.text
     settings = client.get("/api/settings", headers=auth_header)
@@ -192,9 +194,11 @@ def test_credentials_never_appear_in_settings_or_channel_get(client, auth_header
     assert "credentials_encrypted" not in blob
     body = one.json()
     assert body["has_credentials"] is True
-    assert body["platform_hotel_id"] == "mt-100"
+    assert "platform_hotel_id" not in body
     assert "key" not in body
     assert "secret" not in body
+    assert "account" not in body
+    assert "password" not in body
 
 
 def test_live_without_contract_or_authorization_refuses_without_socket(client, auth_header, monkeypatch):
@@ -276,7 +280,8 @@ def test_authorized_local_contract_sends_http_and_reconciles(client, auth_header
         assert server.hits, "expected a real HTTP call to the local official contract server"
         assert server.hits[0]["path"] == "/hotel/prices"
         assert server.hits[0]["key"] == "test-live-key"
-        assert server.hits[0]["body"]["hotel_id"] == "htl-demo-001"
+        # Hotel no longer enters a platform hotel ID; ops/env may still supply it internally.
+        assert "super-secret-do-not-echo" not in str(server.hits[0]["body"])
     finally:
         _stop_contract_server(server)
         client.put("/api/settings", headers=auth_header, json={"execution_policy": {"write_mode": "sandbox"}})

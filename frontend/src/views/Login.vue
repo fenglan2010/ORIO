@@ -22,7 +22,8 @@
         演示账号（模拟数据，不连接真实 OTA）：<br />
         杭州西湖精品酒店（演示）：admin / admin123（酒店管理员）· manager / manager123（收益经理）<br />
         approver / approver123（调价审批人）· analyst / analyst123（运营观察）<br />
-        成都春熙商务酒店（演示）：admin_b / admin123（仅该店管理员）
+        成都春熙商务酒店（演示）：admin_b / admin123（仅该店管理员）<br />
+        <router-link class="link" to="/ops/login">运维端登录</router-link>（官方契约和接口由运维配置，请不要在酒店设置里粘贴契约）
       </div>
     </form>
   </div>

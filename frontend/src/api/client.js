@@ -1,11 +1,20 @@
 const TOKEN_KEY = "oiro_token";
+const SCOPE_KEY = "oiro_scope";
 
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY) || "";
 }
-export function setToken(token) {
-  if (token) localStorage.setItem(TOKEN_KEY, token);
-  else localStorage.removeItem(TOKEN_KEY);
+export function getScope() {
+  return localStorage.getItem(SCOPE_KEY) || "";
+}
+export function setToken(token, scope = "hotel") {
+  if (token) {
+    localStorage.setItem(TOKEN_KEY, token);
+    if (scope) localStorage.setItem(SCOPE_KEY, scope);
+  } else {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(SCOPE_KEY);
+  }
 }
 
 async function request(path, options = {}) {
@@ -17,9 +26,10 @@ async function request(path, options = {}) {
   if (token) headers.Authorization = `Bearer ${token}`;
   const resp = await fetch(path, { ...options, headers });
   if (resp.status === 401) {
+    const scope = getScope();
     setToken("");
-    if (!path.includes("/api/auth/login")) {
-      window.location.hash = "#/login";
+    if (!path.includes("/login")) {
+      window.location.hash = scope === "ops" ? "#/ops/login" : "#/login";
     }
   }
   const text = await resp.text();
@@ -96,9 +106,22 @@ export const api = {
   connectChannel: (platform, payload) => request(`/api/channels/${platform}`, { method: "PUT", body: JSON.stringify(payload) }),
   verifyChannel: (platform) => request(`/api/channels/${platform}/verify`, { method: "POST" }),
   disconnectChannel: (platform) => request(`/api/channels/${platform}/disconnect`, { method: "POST" }),
-  validateChannelContract: (platform, payload) => request(`/api/channels/${platform}/contract/validate`, { method: "POST", body: JSON.stringify(payload) }),
-  installChannelContract: (platform, payload) => request(`/api/channels/${platform}/contract`, { method: "PUT", body: JSON.stringify(payload) }),
-  uninstallChannelContract: (platform) => request(`/api/channels/${platform}/contract`, { method: "DELETE" }),
+  opsLogin: (username, password) =>
+    request("/api/ops/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
+  opsMe: () => request("/api/ops/auth/me"),
+  opsHotels: () => request("/api/ops/hotels"),
+  opsChannels: (hotelId) => request(`/api/ops/hotels/${hotelId}/channels`),
+  opsChannel: (hotelId, platform) => request(`/api/ops/hotels/${hotelId}/channels/${platform}`),
+  opsValidateContract: (hotelId, platform, payload) =>
+    request(`/api/ops/hotels/${hotelId}/channels/${platform}/contract/validate`, { method: "POST", body: JSON.stringify(payload) }),
+  opsInstallContract: (hotelId, platform, payload) =>
+    request(`/api/ops/hotels/${hotelId}/channels/${platform}/contract`, { method: "PUT", body: JSON.stringify(payload) }),
+  opsUninstallContract: (hotelId, platform) =>
+    request(`/api/ops/hotels/${hotelId}/channels/${platform}/contract`, { method: "DELETE" }),
+  opsWriteFlag: (hotelId, platform, enabled) =>
+    request(`/api/ops/hotels/${hotelId}/channels/${platform}/write-flag`, { method: "PUT", body: JSON.stringify({ enabled }) }),
+  opsOfficialCredentials: (hotelId, platform, payload) =>
+    request(`/api/ops/hotels/${hotelId}/channels/${platform}/official-credentials`, { method: "PUT", body: JSON.stringify(payload) }),
   executeStrategy: (id) => request(`/api/strategies/${id}/execute`, { method: "POST" }),
   executeReply: (id) => request(`/api/reviews/${id}/execute`, { method: "POST" }),
   users: () => request("/api/users"),
