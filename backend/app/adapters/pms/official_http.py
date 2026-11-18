@@ -282,6 +282,20 @@ def inspect_official_pms_contract(kind: str, db=None, hotel_id: int | None = Non
 
     if db is not None and hotel_id is not None:
         from app.models import SystemSetting
+        from app.services.local_integrations import get_pms_contract_path
+
+        local_path = get_pms_contract_path(db, hotel_id, kind)
+        if local_path:
+            path = Path(local_path)
+            if path.is_file() and not is_forbidden_example_path(path):
+                accepted = _validate_contract(_read_json_file(path) or {}, kind, path=path)
+                if accepted:
+                    return {
+                        "source": "local_file",
+                        "path": str(path),
+                        "contract": accepted,
+                        "removable": True,
+                    }
 
         row = db.get(SystemSetting, setting_key_for(kind, hotel_id))
         if row and (row.value or "").strip():

@@ -287,6 +287,9 @@ def public_channel(db: Session, hotel_id: int, platform: str) -> dict[str, Any]:
     actions = list((contract or {}).get("actions") or {}) if configured else []
     labels = public_action_labels(actions)
     status = row.status if row else STATUS_DISCONNECTED
+    from app.services.local_integrations import get_ota_contract_path
+
+    contract_path = get_ota_contract_path(db, hotel_id, platform) if db is not None else ""
     body = {
         "platform": platform,
         "label": PLATFORM_LABELS.get(platform, platform),
@@ -295,6 +298,7 @@ def public_channel(db: Session, hotel_id: int, platform: str) -> dict[str, Any]:
         "last_verified": row.last_verified.isoformat() if row and row.last_verified else None,
         "has_credentials": has_usable_credentials(stored),
         "contract_enabled": configured,
+        "contract_file_path": contract_path,
         "open_actions": labels,
         "supported_actions": labels,
         "last_error": sanitize_hotel_error((row.last_error if row else "") or ""),

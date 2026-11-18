@@ -52,6 +52,16 @@ export const api = {
     request("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
   me: () => request("/api/auth/me"),
   health: () => request("/api/health"),
+  installStatus: () => request("/api/install/status"),
+  activateInstall: (install_key) =>
+    request("/api/install/activate", { method: "POST", body: JSON.stringify({ install_key }) }),
+  localConfig: () => request("/api/local-config"),
+  saveLocalModelKeys: (payload) =>
+    request("/api/local-config/model-keys", { method: "PUT", body: JSON.stringify(payload) }),
+  saveOtaContractPath: (platform, payload) =>
+    request(`/api/local-config/ota/${platform}/contract-path`, { method: "PUT", body: JSON.stringify(payload) }),
+  savePmsLocal: (kind, payload) =>
+    request(`/api/local-config/pms/${kind}`, { method: "PUT", body: JSON.stringify(payload) }),
   summary: () => request("/api/dashboard/summary"),
   timeseries: () => request("/api/dashboard/timeseries"),
   competitors: () => request("/api/dashboard/competitors"),

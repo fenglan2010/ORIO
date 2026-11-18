@@ -235,6 +235,8 @@ def public_pms_connection(db: Session, hotel_id: int, kind: str) -> dict[str, An
     actions = list((contract or {}).get("actions") or {}) if configured else []
     labels = public_action_labels(actions)
     status = row.status if row else STATUS_DISCONNECTED
+    from app.services.local_integrations import get_pms_api_endpoint, get_pms_contract_path
+
     body = {
         "kind": kind,
         "label": kind_label(kind, contract) if configured else KIND_LABELS.get(kind, kind),
@@ -243,6 +245,8 @@ def public_pms_connection(db: Session, hotel_id: int, kind: str) -> dict[str, An
         "last_verified": row.last_verified.isoformat() if row and row.last_verified else None,
         "has_credentials": has_usable_credentials(stored),
         "contract_enabled": configured,
+        "contract_file_path": get_pms_contract_path(db, hotel_id, kind),
+        "api_endpoint": get_pms_api_endpoint(db, hotel_id, kind),
         "open_actions": labels,
         "supported_actions": labels,
         "last_error": sanitize_hotel_error((row.last_error if row else "") or ""),

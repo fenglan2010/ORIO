@@ -10,7 +10,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app import __version__
 from app.api import campaigns, alerts, audit, auth, channels, chat, dashboard, diagnosis, evolution, jobs, memories, ops, ops_workbench, pms, reviews, settings, strategies, users, writes
-from app.config import validate_runtime_settings
+from app.config import clear_settings_cache, validate_runtime_settings
+from app.middleware.install_gate import InstallGateMiddleware
+from app.api import install_license, local_config
+from app.services.local_secrets import apply_local_model_keys_to_environ
 from app.database import init_db, is_postgres_url
 from app.schemas import HealthResponse
 from app.seed import ensure_seeded
@@ -21,6 +24,7 @@ log = logging.getLogger("oiro")
 
 app = FastAPI(title="OIRO", description="OTA 智能收益优化官", version=__version__)
 
+app.add_middleware(InstallGateMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -28,6 +32,9 @@ app.add_middleware(
         "http://localhost:5173",
         "http://127.0.0.1:8000",
         "http://localhost:8000",
+        "http://127.0.0.1:4173",
+        "http://localhost:4173",
+        "app://.",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -54,10 +61,14 @@ app.include_router(writes.router)
 app.include_router(jobs.router)
 app.include_router(memories.router)
 app.include_router(evolution.router)
+app.include_router(install_license.router)
+app.include_router(local_config.router)
 
 
 @app.on_event("startup")
 def _startup() -> None:
+    apply_local_model_keys_to_environ()
+    clear_settings_cache()
     settings = validate_runtime_settings()
     backend = "postgresql" if is_postgres_url(settings.database_url) else "sqlite"
     log.info(
@@ -80,3 +91,20 @@ def health():
         time=datetime.now(timezone.utc),
         job_queue=job_queue_mode(),
     )
+
+
+def _mount_static_frontend() -> None:
+    import os
+    from pathlib import Path
+
+    from fastapi.staticfiles import StaticFiles
+
+    root = (os.environ.get("OIRO_STATIC_ROOT") or "").strip()
+    if not root:
+        return
+    directory = Path(root)
+    if directory.is_dir():
+        app.mount("/", StaticFiles(directory=str(directory), html=True), name="frontend")
+
+
+_mount_static_frontend()

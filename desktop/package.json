@@ -1,0 +1,44 @@
+{
+  "name": "oiro-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OIRO local desktop shell (Windows-first)",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "start": "electron .",
+    "build:frontend": "cd ../frontend && npm ci && npm run build",
+    "pack:win": "electron-builder --win --x64",
+    "pack:dir": "electron-builder --dir"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.oiro.desktop",
+    "productName": "OIRO",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "scripts/**/*",
+      {
+        "from": "../frontend/dist",
+        "to": "renderer",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": ["nsis"],
+      "artifactName": "OIRO-Setup-${version}.${ext}"
+    },
+    "extraMetadata": {
+      "oiro": {
+        "note": "Signed Windows installers must be built on Windows; use scripts/build-windows.ps1"
+      }
+    }
+  }
+}

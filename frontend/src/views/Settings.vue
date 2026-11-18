@@ -2,7 +2,7 @@
     <div class="page-head">
       <div>
         <h1>系统设置</h1>
-        <p>管理账号、角色权限、酒店信息、渠道连接与显示偏好。酒店只需授权本店 OTA 或 PMS/CRS 账号和密码；官方契约和接口由运维端配置。PMS/CRS 为官方 API 预留接入，不包含可单独售卖的轻量 PMS。</p>
+        <p>管理账号、角色权限、酒店信息、本机模型密钥、渠道连接与显示偏好。OTA/PMS 官方契约与 API 由你在本机自行配置；开源/桌面模式不把密钥托管到远端服务器。PMS/CRS 为官方 API 预留接入，不包含可单独售卖的轻量 PMS。</p>
       </div>
       <span class="tag" :class="productEnabled ? 'success' : ''">{{ productEnabled ? "已开通" : "尚未开通" }}</span>
     </div>
@@ -120,6 +120,11 @@
               {{ savingConstraints ? "保存中…" : "保存价格约束" }}
             </button>
           </div>
+        </template>
+
+        <!-- local -->
+        <template v-else-if="section === 'local'">
+          <LocalModelKeys />
         </template>
 
         <!-- ota -->
@@ -287,6 +292,7 @@ import { useRoute, useRouter } from "vue-router";
 import Icon from "../components/Icon.vue";
 import ChannelConnections from "../components/ChannelConnections.vue";
 import PmsConnections from "../components/PmsConnections.vue";
+import LocalModelKeys from "../components/LocalModelKeys.vue";
 import { api } from "../api/client";
 import { roleLabel, yen } from "../utils/format";
 import { can } from "../utils/permissions";
@@ -296,6 +302,7 @@ import { loadAppearance, loadNotify, saveAppearance, saveNotify } from "../utils
 const sections = [
   { id: "accounts", label: "账号管理", icon: "user" },
   { id: "hotel", label: "酒店信息", icon: "building" },
+  { id: "local", label: "本机配置", icon: "settings" },
   { id: "ota", label: "OTA渠道", icon: "link" },
   { id: "pms", label: "PMS集成", icon: "pms" },
   { id: "permissions", label: "权限设置", icon: "shield" },

@@ -13,10 +13,12 @@ import Audit from "../views/Audit.vue";
 import Settings from "../views/Settings.vue";
 import OpsLogin from "../views/OpsLogin.vue";
 import OpsConsole from "../views/OpsConsole.vue";
+import InstallActivate from "../views/InstallActivate.vue";
 
 const router = createRouter({
   history: createWebHashHistory(),
   routes: [
+    { path: "/install", component: InstallActivate, meta: { public: true } },
     { path: "/login", component: Login, meta: { public: true } },
     { path: "/ops/login", component: OpsLogin, meta: { public: true, ops: true } },
     { path: "/ops", component: OpsConsole, meta: { ops: true, title: "运维端" } },
@@ -56,6 +58,14 @@ async function ensureMe() {
 }
 
 router.beforeEach(async (to) => {
+  if (to.path !== "/install") {
+    try {
+      const st = await api.installStatus();
+      if (st.blocked) return "/install";
+    } catch {
+      /* offline dev */
+    }
+  }
   if (to.meta.ops) {
     if (to.path === "/ops/login") {
       if (getToken() && getScope() === "ops") return "/ops";

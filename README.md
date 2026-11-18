@@ -1,10 +1,20 @@
-# OIRO · OTA 智能收益优化官（网页版 MVP）
+# OIRO · OTA 智能收益优化官
 
-可本地一键启动的中文 Web 演示：看见问题 → 看懂原因 → 给出策略 → 人审（可选的低风险自动执行）→ 留下沙盒执行记录。
+可本地运行的中文收益运营工作台（Vue 3 + FastAPI + LangGraph）：看见问题 → 看懂原因 → 给出策略 → 人审（可选的低风险自动执行）→ 留下沙盒执行记录。
 
-本仓库按 `/workspace/oiro/docs/` 中的产品定义实现。`docs/source/` 是早期设想归档，冲突时以文档正文为准。
+**主线分发方式（2026）**
 
-## 启动
+| 方式 | 说明 |
+|------|------|
+| [开源从源码](docs/安装指南.md) | `make dev`，**无需**安装密钥；适合贡献者与酒店内网 |
+| [官方桌面包](desktop/README.md) | Electron 壳 + 本机 SQLite；**需要**安装密钥（`OIRO_DISTRIBUTION=packaged`） |
+| Docker / K8s（可选） | 见下方「部署」与 `deploy/`，历史/单机栈 |
+
+中文文档：[安装指南](docs/安装指南.md) · [配置指南](docs/配置指南.md) · [操作运行指南](docs/操作运行指南.md) · 开源协议 [MIT](LICENSE)
+
+本仓库按 `docs/` 中的产品定义实现。`docs/source/` 是早期设想归档，冲突时以文档正文为准。
+
+## 启动（从源码，推荐入门）
 
 在项目根目录执行：
 
@@ -21,7 +31,15 @@ bash scripts/dev.sh
 
 首次启动会创建 `.venv`、安装依赖、写入 `data/oiro.db` 并导入演示数据。前端通过 Vite 把 `/api` 代理到后端，CORS 已允许本地 5173 端口。
 
-复制 `.env.example` 为 `.env` 后可填入国产模型密钥。没有密钥时，DeepSeek / 通义会自动降级到本地确定性模拟器，主流程仍可完整演示。
+模型密钥可在 **系统设置 → 本机配置** 保存（仅存本机），或复制 `.env.example` 为 `.env` 填入（开发用）。没有密钥时，DeepSeek / 通义会自动降级到本地确定性模拟器，主流程仍可完整演示。
+
+桌面一体启动（后端托管 `frontend/dist`）：
+
+```bash
+bash scripts/run-desktop-source.sh
+```
+
+Windows 安装包构建见 `desktop/scripts/build-windows.ps1`（须在 Windows 上执行；本仓库不附带已签名安装程序）。
 
 ## 重置演示数据
 
@@ -52,9 +70,9 @@ source /tmp/oiro-pgtest/env.sh
 make test
 ```
 
-## 部署
+## 部署（可选 / 历史）
 
-本地演示继续用上面的 `make dev` / `scripts/dev.sh`（SQLite，5173 / 8000）。不要把这条共享演示进程改切到 Compose 里的 Postgres。
+本地桌面与从源码运行继续用上面的 `make dev` 或 `scripts/run-desktop-source.sh`（SQLite）。**不要把密钥或用户契约提交到 Git**；参见 `.gitignore`。
 
 要在本机或单机虚机拉起生产形态的栈（前端、API、Postgres、Redis、Celery worker / beat）：
 

@@ -6,7 +6,7 @@
     </div>
     <p class="muted" style="margin-top:0">
       这是官方 PMS/CRS API 预留接入，不是内置的轻量 PMS，也不包含房态工作台。
-      酒店只需填写本店 PMS/CRS 账号和密码（如需授权）；官方契约、接口地址和读写开关由运维端配置。
+      酒店填写本店账号与密码（如需授权），并在本机配置官方契约 JSON 路径与 API 地址（由厂商/运维提供，本仓库不编造生产 URL）。
       这里只显示连接状态、正式契约是否已启用，以及已开放的动作。未启用正式契约时视为未连接，不会出站，也不会把演示数据改写成虚构的厂商回包。
     </p>
     <p v-if="error" class="error">{{ error }}</p>
@@ -41,11 +41,20 @@
           <label>密码</label>
           <input v-model="drafts[ch.kind].password" type="password" autocomplete="new-password" :placeholder="ch.has_credentials ? '已保存，不回显；留空则保持原密码' : '保存后不再回显'" />
         </div>
+        <div class="field" style="grid-column:1 / -1">
+          <label>官方契约 JSON 路径（本机）</label>
+          <input v-model="drafts[ch.kind].contract_file_path" autocomplete="off" :placeholder="ch.contract_file_path || '本机绝对路径'" />
+        </div>
+        <div class="field" style="grid-column:1 / -1">
+          <label>官方 API 地址</label>
+          <input v-model="drafts[ch.kind].api_endpoint" autocomplete="off" :placeholder="ch.api_endpoint || 'https://…（由你方提供）'" />
+        </div>
       </div>
       <div v-if="canManage" class="row" style="margin-top:10px">
         <button class="btn btn-primary btn-sm" type="button" :disabled="busy === ch.kind" @click="save(ch)">
           {{ busy === ch.kind ? "保存中…" : (ch.status === "disconnected" ? "连接并保存" : "保存连接") }}
         </button>
+        <button class="btn btn-sm" type="button" :disabled="busy === ch.kind" @click="saveLocal(ch)">保存本机配置</button>
       </div>
     </div>
     <div class="notice">未由运维端启用正式（非示例）契约前，这里不会显示某一家 PMS 产品已集成。</div>
@@ -78,7 +87,7 @@ const saved = ref("");
 const connections = computed(() => props.items || localConnections.value || []);
 
 function ensureDraft(kind) {
-  if (!drafts[kind]) drafts[kind] = { account: "", password: "" };
+  if (!drafts[kind]) drafts[kind] = { account: "", password: "", contract_file_path: "", api_endpoint: "" };
 }
 
 function actionText(ch) {
@@ -99,6 +108,31 @@ function syncDrafts() {
     ensureDraft(ch.kind);
     drafts[ch.kind].account = "";
     drafts[ch.kind].password = "";
+    if (!drafts[ch.kind].contract_file_path && ch.contract_file_path) {
+      drafts[ch.kind].contract_file_path = ch.contract_file_path;
+    }
+    if (!drafts[ch.kind].api_endpoint && ch.api_endpoint) {
+      drafts[ch.kind].api_endpoint = ch.api_endpoint;
+    }
+  }
+}
+
+async function saveLocal(ch) {
+  busy.value = ch.kind;
+  error.value = "";
+  saved.value = "";
+  try {
+    const draft = drafts[ch.kind] || {};
+    await api.savePmsLocal(ch.kind, {
+      contract_file_path: draft.contract_file_path || "",
+      api_endpoint: draft.api_endpoint || "",
+    });
+    saved.value = "PMS/CRS 本机路径与 API 地址已保存。";
+    emit("refresh");
+  } catch (e) {
+    error.value = e.message;
+  } finally {
+    busy.value = "";
   }
 }
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -9,7 +10,8 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = PROJECT_ROOT / "data"
+DATA_DIR = Path(os.environ.get("OIRO_DATA_DIR", str(PROJECT_ROOT / "data")))
+LOCAL_DIR = DATA_DIR / "local"
 DEFAULT_DB_PATH = DATA_DIR / "oiro.db"
 
 CRITICAL_TASKS = frozenset({"pricing_strategy", "review_reply"})
@@ -31,6 +33,8 @@ class Settings(BaseSettings):
     app_name: str = "OIRO"
     # development | production (also accepts prod). Local demo stays development.
     oiro_env: str = "development"
+    # source | packaged — official desktop installers set packaged; from-source stays source.
+    oiro_distribution: str = Field(default="source", validation_alias="OIRO_DISTRIBUTION")
     database_url: str = Field(default=f"sqlite:///{DEFAULT_DB_PATH}")
     jwt_secret: str = DEMO_JWT_SECRET
     jwt_expire_hours: int = 24
@@ -173,7 +177,9 @@ def validate_runtime_settings(settings: Settings | None = None) -> Settings:
 
 @lru_cache
 def get_settings() -> Settings:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    from app.services.distribution import ensure_data_dirs
+
+    ensure_data_dirs()
     return Settings()
 
 

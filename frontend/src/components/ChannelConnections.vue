@@ -5,7 +5,7 @@
       <span class="muted" style="font-weight:500">账号密码保存后不再回显</span>
     </div>
     <p class="muted" style="margin-top:0">
-      酒店只需授权本店 OTA 账号和密码；官方契约和接口由运维端配置。连接后，这里只显示连接状态、官方契约是否已启用，以及已开放的动作（例如调价、活动）。打开 live 仍要等契约已启用；没有启用契约时改为 live 会被拒绝，且不会出站。账号密码只保存在服务器，保存后不再回显。
+      酒店授权本店 OTA 账号和密码，并在本机指定合作方提供的官方契约 JSON 路径（不会自动加载 docs 下的示例契约）。连接后显示契约是否已启用及已开放动作。未启用有效契约前为沙盒/建议模式；打开 live 仍须契约已启用且写入开关允许。密钥与路径仅保存在本机。
     </p>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="saved" class="notice notice-ok">{{ saved }}</p>
@@ -38,11 +38,16 @@
           <label>OTA 密码</label>
           <input v-model="drafts[ch.platform].password" type="password" autocomplete="new-password" :placeholder="ch.has_credentials ? '已保存，不回显；留空则保持原密码' : '保存后不再回显'" />
         </div>
+        <div class="field" style="grid-column:1 / -1">
+          <label>官方契约 JSON 路径（本机）</label>
+          <input v-model="drafts[ch.platform].contract_file_path" autocomplete="off" :placeholder="ch.contract_file_path || '例如 C:\\\\OIRO\\\\contracts\\\\ctrip.json'" />
+        </div>
       </div>
       <div v-if="!compact && canManage" class="row" style="margin-top:10px">
         <button class="btn btn-primary btn-sm" type="button" :disabled="busy === ch.platform" @click="save(ch)">
           {{ busy === ch.platform ? "保存中…" : (ch.status === "disconnected" ? "连接并保存" : "保存连接") }}
         </button>
+        <button class="btn btn-sm" type="button" :disabled="busy === ch.platform" @click="saveContractPath(ch)">保存契约路径</button>
       </div>
     </div>
     <div v-if="!compact" v-for="name in laterChannels" :key="name" class="subcard">
@@ -93,10 +98,13 @@ function syncList(list) {
   channels.value = rows;
   for (const ch of rows) {
     if (!drafts[ch.platform]) {
-      drafts[ch.platform] = { account: "", password: "" };
+      drafts[ch.platform] = { account: "", password: "", contract_file_path: "" };
     }
     drafts[ch.platform].account = "";
     drafts[ch.platform].password = "";
+    if (!drafts[ch.platform].contract_file_path && ch.contract_file_path) {
+      drafts[ch.platform].contract_file_path = ch.contract_file_path;
+    }
   }
 }
 
@@ -117,6 +125,25 @@ async function refresh() {
   const data = await api.channels();
   localChannels.value = data.channels || [];
   syncList(localChannels.value);
+}
+
+async function saveContractPath(ch) {
+  busy.value = ch.platform;
+  error.value = "";
+  saved.value = "";
+  try {
+    const draft = drafts[ch.platform] || {};
+    await api.saveOtaContractPath(ch.platform, {
+      contract_file_path: draft.contract_file_path || "",
+      account: draft.account || ch.platform_account_id || "",
+    });
+    saved.value = "官方契约路径已绑定到本店 OTA 连接。";
+    emit("refresh");
+  } catch (e) {
+    error.value = e.message;
+  } finally {
+    busy.value = "";
+  }
 }
 
 async function save(ch) {
