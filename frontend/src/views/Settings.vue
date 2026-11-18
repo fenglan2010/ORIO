@@ -4,6 +4,7 @@
         <h1>系统设置</h1>
         <p>管理账号、角色权限、酒店信息、渠道连接与显示偏好。酒店只需授权本店 OTA 或 PMS/CRS 账号和密码；官方契约和接口由运维端配置。PMS/CRS 为官方 API 预留接入，不包含可单独售卖的轻量 PMS。</p>
       </div>
+      <span class="tag" :class="productEnabled ? 'success' : ''">{{ productEnabled ? "已开通" : "尚未开通" }}</span>
     </div>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="saved" class="notice notice-ok">{{ saved }}</p>
@@ -332,6 +333,7 @@ const policy = ref({
 });
 const savingPolicy = ref(false);
 const channels = ref([]);
+const productEnabled = ref(true);
 const pmsConnections = ref([]);
 const users = ref([]);
 const roleCards = ref([]);
@@ -460,6 +462,7 @@ async function load() {
   if (cfg.execution_policy) policy.value = { ...policy.value, ...cfg.execution_policy };
   channels.value = cfg.channels || [];
   pmsConnections.value = cfg.pms_connections || [];
+  productEnabled.value = cfg.product_enabled !== false;
   permissionMatrix.value = cfg.permission_matrix || { roles: [], rows: [] };
   roleCards.value = cfg.roles || [];
   if (can("manage_users")) {

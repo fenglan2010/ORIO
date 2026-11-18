@@ -22,6 +22,10 @@ class TokenResponse(BaseModel):
     hotel_id: int
     hotel_name: str
     city: str = ""
+    product_enabled: bool = True
+    product_status: str = "已开通"
+    onboarding_status: str = "product_enabled"
+    onboarding_status_label: str = "已开通"
 
 
 class UserMe(BaseModel):
@@ -40,6 +44,10 @@ class UserMe(BaseModel):
     tenant_key: str = ""
     pages: list[str] = []
     permissions: dict[str, bool] = {}
+    product_enabled: bool = True
+    product_status: str = "已开通"
+    onboarding_status: str = "product_enabled"
+    onboarding_status_label: str = "已开通"
 
 
 class ReviewDecision(BaseModel):

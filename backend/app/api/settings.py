@@ -14,6 +14,7 @@ from app.services.channels import list_public_channels
 from app.services.pms import list_public_pms_connections
 from app.services.permissions import public_matrix_table, public_role_matrix, require_permission
 from app.services.risk_policy import load_execution_policy, save_execution_policy, validate_execution_policy
+from app.services.onboarding import hotel_public_onboarding
 from app.services.tenancy import public_hotel, users_for_hotel
 from app.services.workflow import engine_info, write_audit
 
@@ -44,6 +45,7 @@ def get_cfg(db: Session = Depends(get_db), hotel: Hotel = Depends(current_hotel)
             "仅当酒店开启自动执行时，通过放行规则的低风险动作可跳过等待并执行；"
             "中高风险与评价回复仍必须人审。"
         ),
+        **hotel_public_onboarding(db, hotel),
     }
 
 

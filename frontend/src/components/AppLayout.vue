@@ -133,6 +133,7 @@
       </header>
 
       <div class="content">
+        <p v-if="me.product_enabled === false" class="notice" style="margin:12px 20px 0">当前酒店尚未开通，待电子合同生效并确认付款后再使用分析与执行功能。设置页仍可查看开通状态。</p>
         <router-view />
       </div>
     </div>

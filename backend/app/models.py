@@ -538,3 +538,31 @@ class PmsStagingRecord(Base):
     fetched_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
+class HotelOnboardingAgreement(Base):
+    """One current commercial onboarding record per hotel (or prospective tenant)."""
+
+    __tablename__ = "hotel_onboarding_agreements"
+    __table_args__ = (UniqueConstraint("hotel_id", name="uq_onboarding_hotel"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    hotel_id: Mapped[int] = mapped_column(ForeignKey("hotels.id"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="initiated")
+    vendor_state: Mapped[str] = mapped_column(String(32), default="not_configured")
+    approval_level: Mapped[int] = mapped_column(Integer, default=0)
+    approval_required: Mapped[int] = mapped_column(Integer, default=2)
+    initiated_by: Mapped[str] = mapped_column(String(64), default="")
+    initiated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    signing_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    submitted_for_approval_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_approved_by: Mapped[str] = mapped_column(String(64), default="")
+    last_approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    contract_effective_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    payment_confirmed_by: Mapped[str] = mapped_column(String(64), default="")
+    payment_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    product_enabled_by: Mapped[str] = mapped_column(String(64), default="")
+    product_enabled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+

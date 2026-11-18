@@ -9,6 +9,7 @@ from app.database import get_db
 from app.models import Hotel, User
 from app.schemas import LoginRequest, TokenResponse, UserMe
 from app.services.permissions import me_payload, role_label
+from app.services.onboarding import public_entitlement
 from app.services.tenancy import membership_for, resolve_current_hotel
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -26,6 +27,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     hotel = resolve_current_hotel(db, user, login_hotel_id=body.hotel_id)
     membership = membership_for(db, user.id, hotel.id)
     role = membership.role if membership else user.role
+    entitlement = public_entitlement(db, hotel)
     return TokenResponse(
         access_token=create_token(user, hotel.id),
         display_name=user.display_name,
@@ -33,6 +35,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
         hotel_id=hotel.id,
         hotel_name=hotel.name,
         city=hotel.city or "",
+        **entitlement,
     )
 
 
@@ -41,4 +44,5 @@ def me(user: User = Depends(get_current_user), hotel: Hotel = Depends(current_ho
     membership = membership_for(db, user.id, hotel.id)
     payload = me_payload(user, hotel, role=membership.role if membership else None)
     payload.setdefault("role_label", role_label(payload.get("role") or user.role))
+    payload.update(public_entitlement(db, hotel))
     return payload

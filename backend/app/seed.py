@@ -34,6 +34,7 @@ from app.models import (
     SystemSetting,
     User,
 )
+from app.services.onboarding import ensure_demo_product_enabled
 from app.services.tenancy import backfill_audit_hotel, ensure_membership, migrate_legacy_settings
 
 COMPETITORS = ("西湖和禧酒店", "湖滨商务酒店", "湖畔丽舍酒店")
@@ -70,38 +71,49 @@ DEMO_ACCOUNTS = (
     ("analyst", "analyst123", "运营观察", "analyst"),
 )
 
-# Distinct operator login. Not a hotel tenant account and not shown in hotel Settings.
-OPS_ACCOUNT = ("ops", "ops123", "运维管理员", "operator")
-
+# Internal staff logins. Not hotel tenant accounts and not shown in hotel Settings.
+# `ops` / `ops123` is the 管理员 account (replaces the legacy single `operator` role).
+OPS_ACCOUNTS = (
+    ("ops", "ops123", "内部管理员", "ops_admin"),
+    ("ops_contract", "contract123", "合同专员", "ops_contract"),
+    ("ops_sysops", "sysops123", "系统运维", "ops_sysops"),
+    ("ops_operations", "operations123", "运营（兼 BD）", "ops_operations"),
+    ("ops_support", "support123", "客服", "ops_support"),
+)
+OPS_ACCOUNT = OPS_ACCOUNTS[0]
 
 
 def seed_ops_user(db: Session) -> User:
-    """Ensure a distinct operator account exists, with no hotel membership."""
-    username, password, display_name, role = OPS_ACCOUNT
-    user = db.query(User).filter(User.username == username).one_or_none()
-    if user is None:
-        user = User(
-            username=username,
-            password_hash=hash_password(password),
-            display_name=display_name,
-            role=role,
-        )
-        db.add(user)
+    """Ensure internal staff accounts exist, with no hotel membership."""
+    admin = None
+    for username, password, display_name, role in OPS_ACCOUNTS:
+        user = db.query(User).filter(User.username == username).one_or_none()
+        if user is None:
+            user = User(
+                username=username,
+                password_hash=hash_password(password),
+                display_name=display_name,
+                role=role,
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+        else:
+            if user.role != role:
+                user.role = role
+            if user.display_name in {"", None, "运维管理员"} and display_name:
+                user.display_name = display_name
+            if getattr(user, "disabled", False) and username == "ops":
+                # The seeded admin must remain usable after migrate.
+                user.disabled = False
+                user.disabled_at = None
+            db.commit()
+            db.refresh(user)
+        db.query(HotelMembership).filter(HotelMembership.user_id == user.id).delete(synchronize_session=False)
         db.commit()
-        db.refresh(user)
-    else:
-        if user.role != role:
-            user.role = role
-        if user.display_name in {"", None}:
-            user.display_name = display_name
-        if getattr(user, "disabled", False):
-            user.disabled = False
-            user.disabled_at = None
-        db.commit()
-        db.refresh(user)
-    db.query(HotelMembership).filter(HotelMembership.user_id == user.id).delete(synchronize_session=False)
-    db.commit()
-    return user
+        if username == "ops":
+            admin = user
+    return admin
 
 def seed_users(db: Session) -> User:
     """Ensure the four demo accounts exist. Promote the historical admin role.
@@ -819,6 +831,8 @@ def seed_all(db: Session, today: date | None = None) -> Hotel:
     seed_metrics_b(db, hotel_b, today)
     seed_reviews_b(db, hotel_b, today)
     seed_alerts_b(db, hotel_b, today)
+    ensure_demo_product_enabled(db, hotel)
+    ensure_demo_product_enabled(db, hotel_b)
     return hotel
 
 

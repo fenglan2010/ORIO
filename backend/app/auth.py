@@ -39,10 +39,21 @@ def verify_password(password: str, stored: str) -> bool:
 SCOPE_HOTEL = "hotel"
 SCOPE_OPS = "ops"
 ROLE_OPERATOR = "operator"
+# Legacy "operator" plus the internal-staff roles. Hotel tenant roles stay separate.
+OPS_ROLE_NAMES = frozenset(
+    {
+        "operator",
+        "ops_admin",
+        "ops_contract",
+        "ops_sysops",
+        "ops_operations",
+        "ops_support",
+    }
+)
 
 
 def is_operator_user(user: User | None) -> bool:
-    return bool(user is not None and getattr(user, "role", "") == ROLE_OPERATOR)
+    return bool(user is not None and getattr(user, "role", "") in OPS_ROLE_NAMES)
 
 
 def create_token(user: User, hotel_id: int | None = None, *, scope: str = SCOPE_HOTEL) -> str:

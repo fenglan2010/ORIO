@@ -41,4 +41,9 @@ def current_hotel(
     )
     bind_session_hotel(db, hotel.id)
     request.state.hotel_id = hotel.id
+    path = (request.url.path or "").rstrip("/") or "/"
+    if not (request.method.upper() == "GET" and path in {"/api/auth/me", "/api/settings"}):
+        from app.services.onboarding import ensure_product_enabled
+
+        ensure_product_enabled(db, hotel)
     return hotel

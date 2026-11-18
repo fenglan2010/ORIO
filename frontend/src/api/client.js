@@ -141,6 +141,33 @@ export const api = {
     request(`/api/ops/hotels/${hotelId}/pms/${kind}/write-flag`, { method: "PUT", body: JSON.stringify({ enabled }) }),
   opsPmsOfficialCredentials: (hotelId, kind, payload) =>
     request(`/api/ops/hotels/${hotelId}/pms/${kind}/official-credentials`, { method: "PUT", body: JSON.stringify(payload) }),
+  opsRoles: () => request("/api/ops/roles"),
+  opsStaff: () => request("/api/ops/staff"),
+  opsCreateStaff: (payload) => request("/api/ops/staff", { method: "POST", body: JSON.stringify(payload) }),
+  opsUpdateStaff: (id, payload) => request(`/api/ops/staff/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  opsOnboardingList: () => request("/api/ops/onboarding"),
+  opsOnboarding: (hotelId) => request(`/api/ops/hotels/${hotelId}/onboarding`),
+  opsInitiateOnboarding: (payload) => request("/api/ops/onboarding/initiate", { method: "POST", body: JSON.stringify(payload) }),
+  opsStartSigning: (hotelId) => request(`/api/ops/hotels/${hotelId}/onboarding/start-signing`, { method: "POST" }),
+  opsSubmitApproval: (hotelId) => request(`/api/ops/hotels/${hotelId}/onboarding/submit-approval`, { method: "POST" }),
+  opsApproveOnboarding: (hotelId) => request(`/api/ops/hotels/${hotelId}/onboarding/approve`, { method: "POST" }),
+  opsMarkPaymentPending: (hotelId) => request(`/api/ops/hotels/${hotelId}/onboarding/mark-payment-pending`, { method: "POST" }),
+  opsConfirmPayment: (hotelId) => request(`/api/ops/hotels/${hotelId}/onboarding/confirm-payment`, { method: "POST" }),
+  opsEnableProduct: (hotelId) => request(`/api/ops/hotels/${hotelId}/onboarding/enable-product`, { method: "POST" }),
+  opsEsign: (hotelId) => request(`/api/ops/hotels/${hotelId}/esign`),
+  opsValidateEsignContract: (hotelId, payload) =>
+    request(`/api/ops/hotels/${hotelId}/esign/contract/validate`, { method: "POST", body: JSON.stringify(payload) }),
+  opsInstallEsignContract: (hotelId, payload) =>
+    request(`/api/ops/hotels/${hotelId}/esign/contract`, { method: "PUT", body: JSON.stringify(payload) }),
+  opsUninstallEsignContract: (hotelId) =>
+    request(`/api/ops/hotels/${hotelId}/esign/contract`, { method: "DELETE" }),
+  opsEsignOfficialCredentials: (hotelId, payload) =>
+    request(`/api/ops/hotels/${hotelId}/esign/official-credentials`, { method: "PUT", body: JSON.stringify(payload) }),
+  opsEsignEnableFlag: (hotelId, enabled) =>
+    request(`/api/ops/hotels/${hotelId}/esign/enable-flag`, { method: "PUT", body: JSON.stringify({ enabled }) }),
+  opsWriteFailures: (hotelId) => request(`/api/ops/hotels/${hotelId}/write-failures`),
+  opsAudit: (hotelId) => request("/api/ops/audit" + (hotelId ? `?hotel_id=${hotelId}` : "")),
+  opsSystem: () => request("/api/ops/system"),
   executeStrategy: (id) => request(`/api/strategies/${id}/execute`, { method: "POST" }),
   executeReply: (id) => request(`/api/reviews/${id}/execute`, { method: "POST" }),
   users: () => request("/api/users"),

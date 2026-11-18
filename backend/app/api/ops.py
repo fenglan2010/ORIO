@@ -33,8 +33,11 @@ from app.services.pms import (
     set_pms_read_flag,
     set_pms_write_flag,
 )
+from app.services.onboarding import public_entitlement
+from app.services.ops_permissions import ops_me_payload, require_ops, sanitize_ops_connection
 from app.services.tenancy import public_hotel
 from app.services.workflow import write_audit
+from app.services.write_flags import public_pending, request_or_confirm_write_flag
 
 router = APIRouter(prefix="/api/ops", tags=["ops"])
 
@@ -84,39 +87,54 @@ def login(body: OpsLoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="账号已停用，无法登录")
     if not is_operator_user(user):
         raise HTTPException(status_code=403, detail="请使用运维账号从运维端登录")
+    payload = ops_me_payload(user)
     return {
         "access_token": create_token(user, scope=SCOPE_OPS),
         "token_type": "bearer",
-        "display_name": user.display_name,
-        "role": "operator",
-        "role_label": "运维管理员",
         "scope": SCOPE_OPS,
+        **payload,
     }
 
 
 @router.get("/auth/me")
 def me(user: User = Depends(get_current_operator)):
-    return {
-        "id": user.id,
-        "username": user.username,
-        "display_name": user.display_name,
-        "role": "operator",
-        "role_label": "运维管理员",
-        "scope": SCOPE_OPS,
-        "disabled": bool(getattr(user, "disabled", False)),
-    }
+    payload = ops_me_payload(user)
+    payload["scope"] = SCOPE_OPS
+    return payload
+
+
+def _ops_hotel_payload(db: Session, hotel: Hotel, user: User) -> dict:
+    payload = {**public_hotel(hotel), **public_entitlement(db, hotel)}
+    return payload
+
+
+def _channel_payload(db: Session, hotel_id: int, platform: str, user: User) -> dict:
+    public = ops_public_channel(db, hotel_id, platform)
+    pending = public_pending(db, hotel_id, platform)
+    if pending:
+        public["write_flag_pending"] = pending
+    return sanitize_ops_connection(public, user)
+
+
+def _pms_payload(db: Session, hotel_id: int, kind: str, user: User) -> dict:
+    public = ops_public_pms_connection(db, hotel_id, kind)
+    pending = public_pending(db, hotel_id, f"pms_{kind}")
+    if pending:
+        public["write_flag_pending"] = pending
+    return sanitize_ops_connection(public, user)
 
 
 @router.get("/hotels")
-def list_hotels(db: Session = Depends(get_db), user: User = Depends(get_current_operator)):
+def list_hotels(db: Session = Depends(get_db), user: User = Depends(require_ops("view_hotels"))):
     rows = db.query(Hotel).order_by(Hotel.id.asc()).all()
-    return {"hotels": [public_hotel(row) for row in rows]}
+    return {"hotels": [_ops_hotel_payload(db, row, user) for row in rows]}
 
 
 @router.get("/hotels/{hotel_id}/channels")
-def list_channels(hotel_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_operator)):
+def list_channels(hotel_id: int, db: Session = Depends(get_db), user: User = Depends(require_ops("view_channels"))):
     hotel = _hotel(db, hotel_id)
-    return {"hotel": public_hotel(hotel), "channels": list_ops_channels(db, hotel.id)}
+    channels = [_channel_payload(db, hotel.id, row["platform"], user) if "platform" in row else sanitize_ops_connection(row, user) for row in list_ops_channels(db, hotel.id)]
+    return {"hotel": _ops_hotel_payload(db, hotel, user), "channels": channels}
 
 
 @router.get("/hotels/{hotel_id}/channels/{platform}")
@@ -124,10 +142,10 @@ def get_channel(
     hotel_id: int,
     platform: str,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_operator),
+    user: User = Depends(require_ops("view_channels")),
 ):
     hotel = _hotel(db, hotel_id)
-    return ops_public_channel(db, hotel.id, _platform(platform))
+    return _channel_payload(db, hotel.id, _platform(platform), user)
 
 
 @router.post("/hotels/{hotel_id}/channels/{platform}/contract/validate")
@@ -136,7 +154,7 @@ def validate_contract(
     platform: str,
     body: dict,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_operator),
+    user: User = Depends(require_ops("install_contracts")),
 ):
     _hotel(db, hotel_id)
     report = validation_report(body, _platform(platform))
@@ -151,7 +169,7 @@ def put_contract(
     platform: str,
     body: dict,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_operator),
+    user: User = Depends(require_ops("install_contracts")),
 ):
     hotel = _hotel(db, hotel_id)
     platform = _platform(platform)
@@ -159,7 +177,7 @@ def put_contract(
         result = install_official_contract(db, platform, body, actor=user.username, hotel_id=hotel.id)
     except ContractValidationError as exc:
         raise HTTPException(status_code=400, detail="；".join(exc.errors or [exc.message])) from exc
-    public = ops_public_channel(db, hotel.id, platform)
+    public = _channel_payload(db, hotel.id, platform, user)
     public.update({k: result[k] for k in result if k not in {"headers", "contract", "auth_header", "key_header", "request_template", "base_url"}})
     return public
 
@@ -169,7 +187,7 @@ def delete_contract(
     hotel_id: int,
     platform: str,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_operator),
+    user: User = Depends(require_ops("install_contracts")),
 ):
     hotel = _hotel(db, hotel_id)
     platform = _platform(platform)
@@ -179,7 +197,7 @@ def delete_contract(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    public = ops_public_channel(db, hotel.id, platform)
+    public = _channel_payload(db, hotel.id, platform, user)
     public.update({k: result[k] for k in result if k not in public})
     return public
 
@@ -190,11 +208,15 @@ def put_write_flag(
     platform: str,
     body: WriteFlagBody,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_operator),
+    user: User = Depends(require_ops("request_write_flag")),
 ):
     hotel = _hotel(db, hotel_id)
     platform = _platform(platform)
-    enabled = set_platform_write_enabled(db, hotel.id, platform, body.enabled)
+
+    def _apply(enabled: bool) -> bool:
+        return set_platform_write_enabled(db, hotel.id, platform, enabled)
+
+    result = request_or_confirm_write_flag(db, hotel.id, platform, body.enabled, user=user, apply=_apply)
     write_audit(
         db,
         actor=user.username,
@@ -202,10 +224,13 @@ def put_write_flag(
         entity_type="channel_connection",
         entity_id=f"{hotel.id}:{platform}",
         hotel_id=hotel.id,
-        after={"platform": platform, "write_flag_enabled": enabled},
-        reason="运维端更新渠道写入开关（不会单独发起出站请求）",
+        after={"platform": platform, "applied": result.get("applied"), "requested_enabled": body.enabled},
+        reason=result.get("message") or "线上写入开关双人确认",
     )
-    return ops_public_channel(db, hotel.id, platform)
+    public = _channel_payload(db, hotel.id, platform, user)
+    public["message"] = result.get("message")
+    public["write_flag_applied"] = result.get("applied")
+    return public
 
 
 @router.put("/hotels/{hotel_id}/channels/{platform}/official-credentials")
@@ -214,7 +239,7 @@ def put_official_credentials(
     platform: str,
     body: OfficialCredentialsBody,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_operator),
+    user: User = Depends(require_ops("install_contracts")),
 ):
     hotel = _hotel(db, hotel_id)
     platform = _platform(platform)
@@ -229,12 +254,16 @@ def put_official_credentials(
         after={"platform": platform, "has_official_credentials": bool(stored)},
         reason="运维端保存官方接口凭证（密钥不写入审计，也不回显）",
     )
-    return ops_public_channel(db, hotel.id, platform)
+    return _channel_payload(db, hotel.id, platform, user)
 
 @router.get("/hotels/{hotel_id}/pms")
-def list_pms(hotel_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_operator)):
+def list_pms(hotel_id: int, db: Session = Depends(get_db), user: User = Depends(require_ops("view_channels"))):
     hotel = _hotel(db, hotel_id)
-    return {"hotel": public_hotel(hotel), "connections": list_ops_pms_connections(db, hotel.id)}
+    connections = []
+    for row in list_ops_pms_connections(db, hotel.id):
+        kind = row.get("kind")
+        connections.append(_pms_payload(db, hotel.id, kind, user) if kind else sanitize_ops_connection(row, user))
+    return {"hotel": _ops_hotel_payload(db, hotel, user), "connections": connections}
 
 
 @router.get("/hotels/{hotel_id}/pms/{kind}")
@@ -242,10 +271,10 @@ def get_pms(
     hotel_id: int,
     kind: str,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_operator),
+    user: User = Depends(require_ops("view_channels")),
 ):
     hotel = _hotel(db, hotel_id)
-    return ops_public_pms_connection(db, hotel.id, _pms_kind(kind))
+    return _pms_payload(db, hotel.id, _pms_kind(kind), user)
 
 
 @router.post("/hotels/{hotel_id}/pms/{kind}/contract/validate")
@@ -254,7 +283,7 @@ def validate_pms_contract(
     kind: str,
     body: dict,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_operator),
+    user: User = Depends(require_ops("install_contracts")),
 ):
     _hotel(db, hotel_id)
     report = pms_validation_report(body, _pms_kind(kind))
@@ -269,7 +298,7 @@ def put_pms_contract(
     kind: str,
     body: dict,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_operator),
+    user: User = Depends(require_ops("install_contracts")),
 ):
     hotel = _hotel(db, hotel_id)
     kind = _pms_kind(kind)
@@ -277,7 +306,7 @@ def put_pms_contract(
         result = install_official_pms_contract(db, kind, body, actor=user.username, hotel_id=hotel.id)
     except ContractValidationError as exc:
         raise HTTPException(status_code=400, detail="；".join(exc.errors or [exc.message])) from exc
-    public = ops_public_pms_connection(db, hotel.id, kind)
+    public = _pms_payload(db, hotel.id, kind, user)
     public.update({k: result[k] for k in result if k not in {"headers", "contract", "auth_header", "key_header", "request_template", "base_url"}})
     return public
 
@@ -287,7 +316,7 @@ def delete_pms_contract(
     hotel_id: int,
     kind: str,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_operator),
+    user: User = Depends(require_ops("install_contracts")),
 ):
     hotel = _hotel(db, hotel_id)
     kind = _pms_kind(kind)
@@ -297,7 +326,7 @@ def delete_pms_contract(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    public = ops_public_pms_connection(db, hotel.id, kind)
+    public = _pms_payload(db, hotel.id, kind, user)
     public.update({k: result[k] for k in result if k not in public})
     return public
 
@@ -312,7 +341,7 @@ def put_pms_read_flag(
     kind: str,
     body: PmsFlagBody,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_operator),
+    user: User = Depends(require_ops("install_contracts")),
 ):
     hotel = _hotel(db, hotel_id)
     kind = _pms_kind(kind)
@@ -327,7 +356,7 @@ def put_pms_read_flag(
         after={"kind": kind, "read_flag_enabled": enabled},
         reason="运维端更新 PMS/CRS 读取开关（不会单独发起出站请求）",
     )
-    return ops_public_pms_connection(db, hotel.id, kind)
+    return _pms_payload(db, hotel.id, kind, user)
 
 
 @router.put("/hotels/{hotel_id}/pms/{kind}/write-flag")
@@ -336,11 +365,15 @@ def put_pms_write_flag(
     kind: str,
     body: PmsFlagBody,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_operator),
+    user: User = Depends(require_ops("request_write_flag")),
 ):
     hotel = _hotel(db, hotel_id)
     kind = _pms_kind(kind)
-    enabled = set_pms_write_flag(db, hotel.id, kind, body.enabled)
+
+    def _apply(enabled: bool) -> bool:
+        return set_pms_write_flag(db, hotel.id, kind, enabled)
+
+    result = request_or_confirm_write_flag(db, hotel.id, f"pms_{kind}", body.enabled, user=user, apply=_apply)
     write_audit(
         db,
         actor=user.username,
@@ -348,10 +381,13 @@ def put_pms_write_flag(
         entity_type="pms_connection",
         entity_id=f"{hotel.id}:{kind}",
         hotel_id=hotel.id,
-        after={"kind": kind, "write_flag_enabled": enabled},
-        reason="运维端更新 PMS/CRS 写入开关（不会单独发起出站请求）",
+        after={"kind": kind, "applied": result.get("applied"), "requested_enabled": body.enabled},
+        reason=result.get("message") or "PMS/CRS 线上写入开关双人确认",
     )
-    return ops_public_pms_connection(db, hotel.id, kind)
+    public = _pms_payload(db, hotel.id, kind, user)
+    public["message"] = result.get("message")
+    public["write_flag_applied"] = result.get("applied")
+    return public
 
 
 @router.put("/hotels/{hotel_id}/pms/{kind}/official-credentials")
@@ -360,7 +396,7 @@ def put_pms_official_credentials(
     kind: str,
     body: OfficialCredentialsBody,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_operator),
+    user: User = Depends(require_ops("install_contracts")),
 ):
     hotel = _hotel(db, hotel_id)
     kind = _pms_kind(kind)
@@ -375,5 +411,5 @@ def put_pms_official_credentials(
         after={"kind": kind, "has_official_credentials": bool(stored)},
         reason="运维端保存官方 PMS/CRS 接口凭证（密钥不写入审计，也不回显）",
     )
-    return ops_public_pms_connection(db, hotel.id, kind)
+    return _pms_payload(db, hotel.id, kind, user)
 

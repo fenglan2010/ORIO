@@ -63,7 +63,8 @@ def _login(client, username="admin", password="admin123"):
 
 
 def _ops_login(client):
-    resp = client.post("/api/ops/auth/login", json={"username": "ops", "password": "ops123"})
+    # Contract desk can install official API contracts. The seeded admin remains ops/ops123.
+    resp = client.post("/api/ops/auth/login", json={"username": "ops_contract", "password": "contract123"})
     assert resp.status_code == 200, resp.text
     return {"Authorization": f"Bearer {resp.json()['access_token']}"}
 

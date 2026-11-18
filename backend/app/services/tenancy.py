@@ -87,7 +87,9 @@ def users_for_hotel(db: Session, hotel_id: int) -> list[User]:
 
 def ensure_membership(db: Session, user: User, hotel: Hotel, role: str | None = None) -> HotelMembership:
     role = (role or user.role or "analyst").strip()
-    if role == "operator" or getattr(user, "role", "") == "operator":
+    from app.services.ops_permissions import is_ops_role
+
+    if is_ops_role(role) or is_ops_role(getattr(user, "role", "")):
         raise ValueError("运维账号不能加入酒店")
     row = membership_for(db, user.id, hotel.id)
     if row is None:

@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     oiro_official_pms_contract_dir: str = ""
     oiro_official_pms_contract: str = ""
     oiro_official_crs_contract: str = ""
+    oiro_official_esign_contract_dir: str = ""
+    oiro_official_esign_contract: str = ""
+    esign_enabled: bool = False
     pms_read_enabled: bool = False
     crs_read_enabled: bool = False
     pms_write_enabled: bool = False
