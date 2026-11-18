@@ -48,6 +48,8 @@ npm run pack:dir
 
 产物目录：`desktop\dist\win-unpacked\`。运行 `OIRO.exe`。
 
+**前端静态资源**：`npm run pack:dir` / `pack:win` 会先检查 `frontend\dist\index.html`；缺少则直接失败。打包后前端位于 **`resources\renderer`**（与 `resources\backend` 同级），供 Python/uvicorn 读取。不要只靠 asar 内的路径——Python 无法读 `app.asar`，会导致窗口空白且 `http://127.0.0.1:8765/` 返回 `{"detail":"Not Found"}`。
+
 **Python 查找顺序（Windows）**：向上查找项目根 `.venv\Scripts\python.exe`（例如与仓库同级的 `ORIO\.venv`）→ 本机 `python` → `py -3` → `python3`。打包应用不会在内置 asar 里找 venv；后端代码位于 `resources\backend`（`extraResources`）。
 
 若未找到 Python，应用弹出中文错误对话框，而不是 `spawn python3 ENOENT` 崩溃。

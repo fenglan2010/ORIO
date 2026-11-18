@@ -5,8 +5,10 @@ const fs = require("fs");
 const {
   findVenvPython,
   resolveBackendDir,
+  resolveStaticRoot,
   pathAnchorsForVenv,
   defaultDistribution,
+  STATIC_MISSING_MESSAGE_ZH,
 } = require("./lib/paths");
 const {
   resolvePythonLaunch,
@@ -28,9 +30,15 @@ function ensureBackendEnv() {
   process.env.OIRO_DISTRIBUTION =
     process.env.OIRO_DISTRIBUTION || defaultDistribution(app.isPackaged);
   process.env.DATABASE_URL = `sqlite:///${path.join(dataDir, "oiro.db")}`;
-  const renderer = path.join(__dirname, "renderer");
-  if (fs.existsSync(renderer)) {
-    process.env.OIRO_STATIC_ROOT = renderer;
+  const staticRoot = resolveStaticRoot({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appDir: __dirname,
+  });
+  if (staticRoot) {
+    process.env.OIRO_STATIC_ROOT = staticRoot;
+  } else if (app.isPackaged && !process.env.OIRO_DEV_URL) {
+    process.env.OIRO_STATIC_ROOT = "";
   }
 }
 
@@ -76,11 +84,18 @@ function startBackend() {
     ? `${spec.cwd}${sep}${env.PYTHONPATH}`
     : spec.cwd;
 
+  const stdio = app.isPackaged ? "pipe" : "inherit";
   apiProcess = spawn(spec.cmd, spec.args, {
     cwd: spec.cwd,
     env,
-    stdio: "inherit",
+    stdio,
   });
+  if (apiProcess.stdout) {
+    apiProcess.stdout.on("data", (chunk) => process.stdout.write(chunk));
+  }
+  if (apiProcess.stderr) {
+    apiProcess.stderr.on("data", (chunk) => process.stderr.write(chunk));
+  }
   apiProcess.on("error", (err) => {
     console.error("OIRO API spawn failed:", err);
     const detail =
@@ -95,6 +110,13 @@ function startBackend() {
 }
 
 function createWindow() {
+  if (
+    app.isPackaged &&
+    !process.env.OIRO_DEV_URL &&
+    !process.env.OIRO_STATIC_ROOT
+  ) {
+    showFatalBackendError(STATIC_MISSING_MESSAGE_ZH);
+  }
   const win = new BrowserWindow({
     width: 1440,
     height: 900,

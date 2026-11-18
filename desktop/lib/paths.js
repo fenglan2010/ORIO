@@ -53,6 +53,29 @@ function resolveBackendDir({ isPackaged, resourcesPath, appDir }) {
   );
 }
 
+/**
+ * Directory uvicorn (Python) can read — not inside app.asar.
+ * Packaged builds place renderer under resources/renderer via extraResources.
+ */
+function resolveStaticRoot({ isPackaged, resourcesPath, appDir }) {
+  const candidates = [];
+  if (isPackaged) {
+    candidates.push(path.join(resourcesPath, "renderer"));
+  } else {
+    candidates.push(
+      path.join(appDir, "renderer"),
+      path.join(path.resolve(appDir, ".."), "frontend", "dist")
+    );
+  }
+  for (const dir of candidates) {
+    const indexHtml = path.join(dir, "index.html");
+    if (fs.existsSync(indexHtml)) {
+      return dir;
+    }
+  }
+  return null;
+}
+
 function pathAnchorsForVenv({ isPackaged, resourcesPath, execPath, appDir }) {
   if (isPackaged) {
     return [
@@ -68,10 +91,22 @@ function defaultDistribution(isPackaged) {
   return isPackaged ? "packaged" : "source";
 }
 
+const STATIC_MISSING_MESSAGE_ZH =
+  "未找到前端静态资源（index.html）。\n\n" +
+  "打包前必须在仓库中构建前端：\n" +
+  "  cd frontend\n" +
+  "  npm ci\n" +
+  "  npm run build\n" +
+  "  cd ..\\desktop\n" +
+  "  npm run pack:dir\n\n" +
+  "若窗口空白且浏览器访问 http://127.0.0.1:8765/ 返回 Not Found，说明 OIRO_STATIC_ROOT 未挂载。";
+
 module.exports = {
   findVenvPython,
   findVenvPythonFrom,
   resolveBackendDir,
+  resolveStaticRoot,
   pathAnchorsForVenv,
   defaultDistribution,
+  STATIC_MISSING_MESSAGE_ZH,
 };

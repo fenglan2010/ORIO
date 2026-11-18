@@ -6,6 +6,7 @@ const os = require("os");
 const {
   findVenvPythonFrom,
   resolveBackendDir,
+  resolveStaticRoot,
   defaultDistribution,
 } = require("../lib/paths");
 
@@ -42,6 +43,39 @@ test("resolveBackendDir prefers bundled backend when packaged", () => {
     appDir: path.join(root, "app.asar"),
   });
   assert.equal(resolved, backend);
+
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("resolveStaticRoot uses resources/renderer when packaged", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "oiro-static-"));
+  const resources = path.join(root, "resources");
+  const renderer = path.join(resources, "renderer");
+  fs.mkdirSync(renderer, { recursive: true });
+  fs.writeFileSync(path.join(renderer, "index.html"), "<html></html>");
+
+  const resolved = resolveStaticRoot({
+    isPackaged: true,
+    resourcesPath: resources,
+    appDir: path.join(root, "app.asar"),
+  });
+  assert.equal(resolved, renderer);
+
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test("resolveStaticRoot does not use asar renderer path when only asar has files", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "oiro-asar-"));
+  const asarRenderer = path.join(root, "app.asar", "renderer");
+  fs.mkdirSync(asarRenderer, { recursive: true });
+  fs.writeFileSync(path.join(asarRenderer, "index.html"), "<html></html>");
+
+  const resolved = resolveStaticRoot({
+    isPackaged: true,
+    resourcesPath: path.join(root, "resources-empty"),
+    appDir: path.join(root, "app.asar"),
+  });
+  assert.equal(resolved, null);
 
   fs.rmSync(root, { recursive: true, force: true });
 });

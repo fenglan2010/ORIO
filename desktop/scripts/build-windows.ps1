@@ -22,7 +22,7 @@ $env:CSC_IDENTITY_AUTO_DISCOVERY = "false"
 $env:OIRO_DISTRIBUTION = "packaged"
 
 npm ci
-npm run pack:win
+npm run pack:dir
 
 Write-Host "Artifacts in desktop\dist (run desktop\dist\win-unpacked\OIRO.exe)"
 Write-Host "Optional signing: run PowerShell as Administrator or enable Windows Developer Mode if a future build step needs symlink privileges."
