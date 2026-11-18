@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "node scripts/dev.js",
     "start": "electron .",
+    "test": "node --test tests/*.test.js",
     "build:frontend": "cd ../frontend && npm ci && npm run build",
     "pack:win": "electron-builder --win --x64",
     "pack:dir": "electron-builder --dir"
@@ -24,6 +25,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "lib/**/*",
       "scripts/**/*",
       {
         "from": "../frontend/dist",
@@ -31,9 +33,29 @@
         "filter": ["**/*"]
       }
     ],
+    "extraResources": [
+      {
+        "from": "../backend",
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/.env",
+          "!**/.env.*",
+          "!**/tests/**",
+          "!data/**",
+          "!**/*.db"
+        ]
+      }
+    ],
     "win": {
-      "target": ["nsis"],
-      "artifactName": "OIRO-Setup-${version}.${ext}"
+      "target": [
+        { "target": "dir", "arch": ["x64"] },
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "artifactName": "OIRO-Setup-${version}.${ext}",
+      "signAndEditExecutable": false
     },
     "extraMetadata": {
       "oiro": {

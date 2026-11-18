@@ -13,14 +13,51 @@ make dev
 cd desktop && npm install && OIRO_DEV_URL=http://127.0.0.1:5173 npm start
 ```
 
+从源码直接 `electron .` 或 `npm start` 时，`OIRO_DISTRIBUTION` 默认为 **`source`**（与 Python 后端一致），不会意外启用安装密钥门闩。仅正式打包产物默认为 `packaged`。
+
 测试**正式包安装密钥门闩**：
 
 ```bash
 OIRO_DISTRIBUTION=packaged OIRO_INSTALL_KEY_ACCEPT=OIRO-TEST-0000-0000-0000 bash scripts/dev.sh
 ```
 
-## Windows 安装包
+## Node 单元测试（路径 / Python 解析）
 
-在 **Windows** 上执行 `scripts/build-windows.ps1`。本 Linux CI 环境不产出已签名的 `.exe`，仅提供可复现脚本与 `electron-builder` 配置。
+```bash
+cd desktop && npm test
+```
+
+## Windows 打包与运行
+
+在 **Windows** 上用 PowerShell 执行（无需 `make`）：
+
+```powershell
+git clone <your-repo-url> ORIO
+cd ORIO
+python -m venv .venv
+.\.venv\Scripts\pip install -r backend\requirements.txt
+cd frontend
+npm ci
+npm run build
+cd ..\desktop
+npm ci
+$env:CSC_IDENTITY_AUTO_DISCOVERY = "false"
+$env:OIRO_DISTRIBUTION = "packaged"
+npm run pack:dir
+```
+
+产物目录：`desktop\dist\win-unpacked\`。运行 `OIRO.exe`。
+
+**Python 查找顺序（Windows）**：向上查找项目根 `.venv\Scripts\python.exe`（例如与仓库同级的 `ORIO\.venv`）→ 本机 `python` → `py -3` → `python3`。打包应用不会在内置 asar 里找 venv；后端代码位于 `resources\backend`（`extraResources`）。
+
+若未找到 Python，应用弹出中文错误对话框，而不是 `spawn python3 ENOENT` 崩溃。
+
+一键脚本（含前端构建）：
+
+```powershell
+.\desktop\scripts\build-windows.ps1
+```
+
+`CSC_IDENTITY_AUTO_DISCOVERY=false` 用于避免未签名构建时解压 `winCodeSign` 失败。若你自行启用代码签名且遇到符号链接权限错误，请以管理员身份运行 PowerShell 或开启 Windows **开发人员模式**。
 
 正式安装包设置 `OIRO_DISTRIBUTION=packaged`；开源从源码运行保持默认 `source`，无需安装密钥。
