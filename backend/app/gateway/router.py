@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import time
-from collections import defaultdict, deque
-from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -15,23 +13,23 @@ from app.gateway.adapters.grok import GrokAdapter
 from app.gateway.adapters.mock import MockModelAdapter
 from app.gateway.adapters.openai_ad import OpenAIAdapter
 from app.gateway.adapters.qwen import QwenAdapter
+from app.gateway.adapters.self_hosted import SelfHostedAdapter
+from app.gateway.preferences import (
+    DEFAULT_DOMESTIC_CHAIN,
+    DEFAULT_TASK_PREFERENCES,
+    TASK_STRENGTHS,
+    PreferenceTable,
+    build_route_chain,
+    resolve_preferences,
+)
 from app.gateway.protocol import LLMRequest, LLMResponse
+from app.gateway.resilience import (
+    ResiliencePolicy,
+    VendorTimeoutError,
+    error_code_for,
+    invoke_with_timeout,
+)
 from app.models import ModelCallLog, SystemSetting
-
-# Simple per-vendor rate limit: 30 calls / rolling minute.
-_RATE_LIMIT = 30
-_calls: dict[str, deque[float]] = defaultdict(deque)
-
-
-def _rate_ok(vendor: str) -> bool:
-    now = time.time()
-    q = _calls[vendor]
-    while q and now - q[0] > 60:
-        q.popleft()
-    if len(q) >= _RATE_LIMIT:
-        return False
-    q.append(now)
-    return True
 
 
 def read_overseas_enabled(db: Session | None, settings: Settings) -> bool:
@@ -48,41 +46,45 @@ def is_critical(request: LLMRequest) -> bool:
     return request.execution_critical or request.task_type in CRITICAL_TASKS
 
 
+def _policy_from_settings(settings: Settings) -> ResiliencePolicy:
+    return ResiliencePolicy(
+        rate_limit_per_minute=settings.llm_rate_limit_per_minute,
+        vendor_concurrency=settings.llm_vendor_concurrency,
+        global_concurrency=settings.llm_global_concurrency,
+        queue_wait_seconds=settings.llm_queue_wait_seconds,
+        timeout_seconds=settings.llm_timeout_seconds,
+        circuit_failure_threshold=settings.llm_circuit_failure_threshold,
+        circuit_cooldown_seconds=settings.llm_circuit_cooldown_seconds,
+    )
+
+
 class ModelGateway:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
         self.adapters = {
             "deepseek": DeepSeekAdapter(self.settings),
             "qwen": QwenAdapter(self.settings),
+            "self_hosted": SelfHostedAdapter(self.settings),
             "openai": OpenAIAdapter(self.settings),
             "gemini": GeminiAdapter(self.settings),
             "grok": GrokAdapter(self.settings),
             "mock": MockModelAdapter(),
         }
+        self.preferences: PreferenceTable = resolve_preferences(self.settings)
+        self.resilience = _policy_from_settings(self.settings)
 
     def route_chain(self, request: LLMRequest, overseas_enabled: bool) -> list[str]:
         """
         Return vendor names to try, in order. The model never picks the next hop —
         the gateway does. Critical tasks are barred from overseas vendors even if
-        the overseas switch is on.
+        the overseas switch is on or a preference list tries to include them.
         """
-        critical = is_critical(request)
-        allow_overseas = overseas_enabled and not critical
-
-        chain: list[str] = ["deepseek", "qwen"]
-        if allow_overseas:
-            if request.task_type == "vision_or_longdoc":
-                chain.extend(["gemini", "openai", "grok"])
-            else:
-                chain.extend(["openai", "gemini", "grok"])
-        chain.append("mock")
-
-        # Defence in depth: never let an overseas vendor onto a critical chain.
-        if critical:
-            chain = [v for v in chain if v not in OVERSEAS_VENDORS]
-            if "mock" not in chain:
-                chain.append("mock")
-        return chain
+        return build_route_chain(
+            request.task_type,
+            critical=is_critical(request),
+            overseas_enabled=overseas_enabled,
+            table=self.preferences,
+        )
 
     def complete(self, request: LLMRequest, db: Session | None = None) -> LLMResponse:
         overseas_enabled = read_overseas_enabled(db, self.settings)
@@ -90,27 +92,44 @@ class ModelGateway:
         errors: list[str] = []
         started_chain = time.perf_counter()
 
-        for vendor in chain:
-            adapter = self.adapters[vendor]
-            # Mock is always available; others need a key.
-            if vendor != "mock" and not adapter.available():
-                errors.append(f"{vendor}:no_key")
-                continue
-            if vendor in OVERSEAS_VENDORS:
-                # Final hard guard, even if the chain was built incorrectly.
-                if is_critical(request) or not overseas_enabled:
-                    errors.append(f"{vendor}:blocked_outbound")
-                    continue
-            if not _rate_ok(vendor):
-                errors.append(f"{vendor}:rate_limited")
-                continue
+        try:
+            for vendor in chain:
+                response, skip_reason = self._try_vendor(
+                    request, vendor=vendor, chain=chain, overseas_enabled=overseas_enabled, db=db
+                )
+                if response is not None:
+                    if errors and (response.vendor == "mock" or response.degraded):
+                        # vendor:code tokens only — never exception text
+                        if not response.error_message:
+                            response.error_message = "; ".join(errors)
+                    return response
+                if skip_reason:
+                    errors.append(skip_reason)
+        except Exception:  # noqa: BLE001 — never abort the LangGraph decision flow
+            errors.append("gateway:uncaught")
 
-            t0 = time.perf_counter()
-            try:
-                response = adapter.complete(request)
-            except Exception as exc:  # noqa: BLE001 — we degrade, then audit
-                latency = int((time.perf_counter() - t0) * 1000)
-                errors.append(f"{vendor}:{type(exc).__name__}")
+        return self._mock_fallback(request, db, errors, started_chain)
+
+    def _try_vendor(
+        self,
+        request: LLMRequest,
+        *,
+        vendor: str,
+        chain: list[str],
+        overseas_enabled: bool,
+        db: Session | None,
+    ) -> tuple[LLMResponse | None, str]:
+        adapter = self.adapters.get(vendor)
+        if adapter is None:
+            return None, f"{vendor}:unknown_vendor"
+        if vendor != "mock" and not adapter.available():
+            return None, f"{vendor}:no_key"
+        if vendor in OVERSEAS_VENDORS:
+            if is_critical(request) or not overseas_enabled:
+                return None, f"{vendor}:blocked_outbound"
+        if vendor != "mock":
+            allowed, state = self.resilience.breaker.allow(vendor)
+            if not allowed:
                 self._audit(
                     db,
                     request,
@@ -118,45 +137,114 @@ class ModelGateway:
                     model=getattr(adapter, "model", vendor),
                     outbound=vendor in OVERSEAS_VENDORS,
                     degraded=False,
-                    status="error",
-                    latency_ms=latency,
-                    error_code=type(exc).__name__,
+                    status="skipped",
+                    latency_ms=0,
+                    error_code="circuit_open",
                 )
-                continue
+                return None, f"{vendor}:circuit_open"
+        else:
+            state = "closed"
 
-            latency = int((time.perf_counter() - t0) * 1000)
-            response.latency_ms = latency
-            # If we fell past the primary, mark as degraded.
-            used_fallback = vendor != chain[0] or vendor == "mock"
-            if used_fallback:
-                response.degraded = True
-                if not response.degrade_notice:
-                    response.degrade_notice = "当前为降级结果"
-            # Refuse to return an overseas result for critical tasks.
-            if is_critical(request) and response.outbound:
-                errors.append(f"{vendor}:rejected_outbound_result")
-                continue
+        if vendor != "mock" and not self.resilience.rate_limiter.allow(vendor):
+            return None, f"{vendor}:rate_limited"
+
+        acquired = True if vendor == "mock" else self.resilience.gate.acquire(vendor)
+        if not acquired:
             self._audit(
                 db,
                 request,
-                vendor=response.vendor,
-                model=response.model,
-                outbound=response.outbound,
-                degraded=response.degraded,
-                status=response.status,
-                latency_ms=latency,
-                error_code="",
-                usage=response.usage,
+                vendor=vendor,
+                model=getattr(adapter, "model", vendor),
+                outbound=vendor in OVERSEAS_VENDORS,
+                degraded=False,
+                status="skipped",
+                latency_ms=0,
+                error_code="queue_timeout",
             )
-            return response
+            return None, f"{vendor}:queue_timeout"
 
-        # Should be unreachable because mock is always last and always works,
-        # but keep a hard fallback anyway.
+        t0 = time.perf_counter()
+        try:
+            if vendor == "mock":
+                response = adapter.complete(request)
+            else:
+                response = self._invoke_guarded(vendor, lambda: adapter.complete(request))
+        except Exception as exc:  # noqa: BLE001 — we degrade, then audit
+            latency = int((time.perf_counter() - t0) * 1000)
+            code = error_code_for(exc)
+            if vendor != "mock":
+                self.resilience.breaker.record_failure(vendor)
+            self._audit(
+                db,
+                request,
+                vendor=vendor,
+                model=getattr(adapter, "model", vendor),
+                outbound=vendor in OVERSEAS_VENDORS,
+                degraded=False,
+                status="error",
+                latency_ms=latency,
+                error_code=code,
+            )
+            return None, f"{vendor}:{code}"
+
+        latency = int((time.perf_counter() - t0) * 1000)
+        response.latency_ms = latency
+        if vendor != "mock":
+            self.resilience.breaker.record_success(vendor)
+        used_fallback = vendor != chain[0] or vendor == "mock"
+        if used_fallback:
+            response.degraded = True
+            if not response.degrade_notice:
+                response.degrade_notice = "当前为降级结果"
+        if is_critical(request) and response.outbound:
+            return None, f"{vendor}:rejected_outbound_result"
+        # Probe state is only used for ops visibility; success already closed the breaker.
+        _ = state
+        self._audit(
+            db,
+            request,
+            vendor=response.vendor,
+            model=response.model,
+            outbound=response.outbound,
+            degraded=response.degraded,
+            status=response.status,
+            latency_ms=latency,
+            error_code="",
+            usage=response.usage,
+        )
+        return response, ""
+
+    def _invoke_guarded(self, vendor: str, func):
+        """Run a vendor call with timeout; release the concurrency slot when the worker finishes."""
+
+        def work():
+            try:
+                return func()
+            finally:
+                self.resilience.gate.release(vendor)
+
+        try:
+            return invoke_with_timeout(work, self.resilience.timeout_seconds)
+        except VendorTimeoutError:
+            # work() still holds the slot until the underlying call returns.
+            raise
+        except Exception:
+            # work() already released in finally if it raised before returning.
+            raise
+
+    def _mock_fallback(
+        self,
+        request: LLMRequest,
+        db: Session | None,
+        errors: list[str],
+        started_chain: float,
+    ) -> LLMResponse:
         latency = int((time.perf_counter() - started_chain) * 1000)
         response = self.adapters["mock"].complete(request)
         response.degraded = True
         response.degrade_notice = "当前为降级结果（全部上游失败）"
         response.error_code = "all_vendors_failed"
+        # Only vendor:code tokens — never include exception text (may leak URLs or keys).
         response.error_message = "; ".join(errors)
         response.latency_ms = latency
         self._audit(
@@ -210,7 +298,7 @@ class ModelGateway:
         except Exception:
             db.rollback()
 
-    def describe(self, db: Session | None = None) -> dict:
+    def describe(self, db: Session | None = None, *, for_ops: bool = False) -> dict:
         settings = self.settings
         overseas_enabled = read_overseas_enabled(db, settings)
         adapters = []
@@ -221,6 +309,7 @@ class ModelGateway:
                     "role": {
                         "deepseek": "国产主模型",
                         "qwen": "国产备用",
+                        "self_hosted": "自建开源模型（预留，默认关闭）",
                         "openai": "境外对照（默认关闭）",
                         "gemini": "境外，长上下文与多模态（默认关闭）",
                         "grok": "境外，非收益决策首选（默认关闭）",
@@ -232,15 +321,21 @@ class ModelGateway:
                     "status": (
                         "ready"
                         if adapter.available()
-                        else ("always_on" if name == "mock" else "no_key_will_skip")
+                        else (
+                            "always_on"
+                            if name == "mock"
+                            else ("not_configured_will_skip" if name == "self_hosted" else "no_key_will_skip")
+                        )
                     ),
                 }
             )
-        return {
+        # Hotel Settings must not see the reserved self-hosted hook, its URL, or keys.
+        visible = adapters if for_ops else [a for a in adapters if a["vendor"] != "self_hosted"]
+        payload = {
             "overseas_enabled": overseas_enabled,
             "critical_tasks_blocked_from_overseas": sorted(CRITICAL_TASKS),
-            "default_chain": ["deepseek", "qwen", "mock"],
-            "adapters": adapters,
+            "default_chain": list(DEFAULT_DOMESTIC_CHAIN) if for_ops else ["deepseek", "qwen", "mock"],
+            "adapters": visible,
             "rules": [
                 "按任务路由，不按厂商写业务。",
                 "主模型失败则切备用国产模型，再失败则切 Mock，并标明降级。",
@@ -249,6 +344,28 @@ class ModelGateway:
                 "调用审计不记录密钥。",
             ],
         }
+        if for_ops:
+            payload["task_preferences"] = {
+                task: {
+                    "strength": TASK_STRENGTHS.get(task, ""),
+                    "default": list(DEFAULT_TASK_PREFERENCES[task]),
+                    "configured": list(self.preferences.preferred(task)),
+                    "overridden": task in self.preferences.overrides,
+                }
+                for task in TASK_STRENGTHS
+            }
+            payload["preference_notes"] = [
+                {"task": n.task, "vendor": n.vendor, "reason": n.reason}
+                for n in self.preferences.notes
+            ]
+            payload["resilience"] = self.resilience.describe()
+            payload["circuit_breakers"] = self.resilience.circuit_snapshot()
+            payload["rules"] = list(payload["rules"]) + [
+                "任务偏好与限流/排队/熔断只在服务器环境或内部运维可见，酒店设置不配置路由或密钥。",
+                "自建开源模型是预留接入：默认关闭，不编造生产地址；在腾讯云或阿里云部署后填写服务器环境变量即可启用。",
+                "限流与熔断为单进程内实现；多副本需后续接入共享限流。",
+            ]
+        return payload
 
 
 _gateway: ModelGateway | None = None
@@ -263,4 +380,9 @@ def get_gateway() -> ModelGateway:
 
 def reset_gateway() -> None:
     global _gateway
+    if _gateway is not None:
+        try:
+            _gateway.resilience.reset()
+        except Exception:
+            pass
     _gateway = None

@@ -96,4 +96,5 @@ def test_chat_and_settings_without_keys(client, auth_header):
     assert "pricing_strategy" in body["critical_rule"]
     vendors = {a["vendor"] for a in body["gateway"]["adapters"]}
     assert {"deepseek", "qwen", "openai", "gemini", "grok", "mock"} <= vendors
+    assert "self_hosted" not in vendors
     assert body["workflow"]["auto_execute_on_low_risk"] is False

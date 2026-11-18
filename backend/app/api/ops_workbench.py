@@ -431,7 +431,7 @@ def list_ops_audit(
 def system_status(db: Session = Depends(get_db), user: User = Depends(require_ops("view_system"))):
     settings = get_settings()
     info = engine_info()
-    gw = get_gateway().describe(db)
+    gw = get_gateway().describe(db, for_ops=True)
     adapters = []
     for item in gw.get("adapters") or []:
         adapters.append(
@@ -459,6 +459,11 @@ def system_status(db: Session = Depends(get_db), user: User = Depends(require_op
             "default_chain": gw.get("default_chain"),
             "adapters": adapters,
             "critical_tasks_blocked_from_overseas": gw.get("critical_tasks_blocked_from_overseas"),
+            "task_preferences": gw.get("task_preferences"),
+            "preference_notes": gw.get("preference_notes") or [],
+            "resilience": gw.get("resilience"),
+            "circuit_breakers": gw.get("circuit_breakers") or [],
+            "rules": gw.get("rules") or [],
         },
         "notes": [
             "系统运维岗不安装商务或官方 API 契约，也不查看酒店密码或官方密钥。",

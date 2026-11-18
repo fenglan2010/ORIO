@@ -13,6 +13,9 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "")
     monkeypatch.setenv("GEMINI_API_KEY", "")
     monkeypatch.setenv("GROK_API_KEY", "")
+    monkeypatch.setenv("SELF_HOSTED_API_KEY", "")
+    monkeypatch.setenv("SELF_HOSTED_BASE_URL", "")
+    monkeypatch.setenv("SELF_HOSTED_MODEL", "")
     monkeypatch.setenv("OVERSEAS_ENABLED", "false")
     monkeypatch.setenv("JWT_SECRET", "test-secret-oiro-mvp-please-use-32b")
 

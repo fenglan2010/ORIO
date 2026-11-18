@@ -97,7 +97,7 @@ make build
 
 - 控制流节点：`data_node → signal_node → analysis_node → strategy_node → human_review → execution_node → memory_node`。`memory_node` 沉淀本店已执行或已否决的决策，并写入匿名行业模式供跨店引用；本店记忆不跨店，也不编造调价收益。
 - 优先使用 **LangGraph**；若环境无法安装，则使用节点名称与语义等价的状态机，并在系统设置页标明。
-- 模型网关：统一协议；适配 DeepSeek（主）、Qwen（备）、OpenAI、Gemini、Grok、Mock。境外模型默认关闭。`pricing_strategy` 与 `review_reply` 即使开关打开也绝不出境。
+- 模型网关：统一协议；按任务路由，不按厂商写业务。默认国内链路为 DeepSeek（主）→ Qwen（备）→ 自建开源模型（预留，默认关闭）→ Mock。境外适配器 OpenAI / Gemini / Grok 默认关闭。`pricing_strategy` 与 `review_reply` 即使开关打开也绝不出境；自建开源端点视为国内，关键任务可以使用，但仍不得出境。任务偏好、限流、排队与熔断只在服务器环境或内部运维配置，单 API 进程内生效（多副本需后续接入共享限流）。酒店设置不配置、也不展示模型路由、适配器、境内外开关、自建开源地址或密钥。无密钥或未填写自建地址时自动跳过并降级，主流程仍可演示。
 - 价格区间由可解释启发式计算，大模型只写理由，不得直接给出不可复核的执行价。
 - 风险等级 `low / medium / high` 用于展示、审计和放行。**默认自动执行关闭**，行为与第一阶段相同。酒店开启后，仅低风险、非节假日、调价幅度低于阈值（默认 15%）的方案可自动执行；中高风险、活动报名和评价回复仍必须人审。自动执行审计操作人为 `system:auto_execute`，并保留检查点与回滚。
 - 执行前写入 Checkpoint，回滚绑定 `checkpoint_id`。界面可追溯一条策略经过的节点。

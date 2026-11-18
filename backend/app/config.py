@@ -14,7 +14,7 @@ DEFAULT_DB_PATH = DATA_DIR / "oiro.db"
 
 CRITICAL_TASKS = frozenset({"pricing_strategy", "review_reply"})
 OVERSEAS_VENDORS = frozenset({"openai", "gemini", "grok"})
-DOMESTIC_VENDORS = frozenset({"deepseek", "qwen"})
+DOMESTIC_VENDORS = frozenset({"deepseek", "qwen", "self_hosted"})
 
 # Local-demo default only. Production (OIRO_ENV=production) must replace this.
 DEMO_JWT_SECRET = "oiro-demo-secret-change-me"
@@ -55,7 +55,32 @@ class Settings(BaseSettings):
     grok_base_url: str = "https://api.x.ai/v1"
     grok_model: str = "grok-2-latest"
 
+    # Reserved self-hosted OSS model (OpenAI-compatible). All empty = disabled.
+    # Never invent a production host. Fill these only after deploying one
+    # on 腾讯云 / 阿里云 (or another in-country host). Server / ops only.
+    self_hosted_api_key: str = ""
+    self_hosted_base_url: str = ""
+    self_hosted_model: str = ""
+
     overseas_enabled: bool = False
+
+    # Per-task model preference overrides (comma-separated vendor names).
+    # Empty means the documented default. Unknown vendors are ignored.
+    # Critical tasks cannot be routed overseas even if listed here.
+    # Server / ops only — never expose as hotel Settings.
+    llm_task_pref_analysis: str = ""
+    llm_task_pref_pricing_strategy: str = ""
+    llm_task_pref_review_reply: str = ""
+    llm_task_pref_assistant_chat: str = ""
+    llm_task_pref_vision_or_longdoc: str = ""
+
+    # In-process gateway resilience. Multi-replica needs a later shared limiter.
+    llm_rate_limit_per_minute: int = 30
+    llm_vendor_concurrency: int = 4
+    llm_global_concurrency: int = 8
+    llm_queue_wait_seconds: float = 5.0
+    llm_circuit_failure_threshold: int = 3
+    llm_circuit_cooldown_seconds: float = 30.0
 
     # Official OTA write (server-only). Never expose these on the hotel UI.
     # Live HTTP is sent only when the channel is authorized, credentials exist,

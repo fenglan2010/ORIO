@@ -31,7 +31,7 @@ def get_cfg(db: Session = Depends(get_db), hotel: Hotel = Depends(current_hotel)
     policy = load_execution_policy(db, hotel_id=hotel.id)
     return {
         "hotel": public_hotel(hotel),
-        "gateway": gw.describe(db),
+        "gateway": gw.describe(db, for_ops=False),
         "workflow": engine_info(db, hotel_id=hotel.id),
         "overseas_enabled": read_overseas_enabled(db, get_settings()),
         "execution_policy": policy.to_public_dict(),
