@@ -411,3 +411,90 @@ class IndustryPatternContribution(Base):
     memory_record_id: Mapped[int | None] = mapped_column(ForeignKey("memory_records.id"), nullable=True)
     episode_key: Mapped[str] = mapped_column(String(128), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class GraphNode(Base):
+    """Hotel-scoped knowledge-graph node. Never stores another hotel's identity."""
+
+    __tablename__ = "graph_nodes"
+    __table_args__ = (UniqueConstraint("hotel_id", "node_key", name="uq_graph_node_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    hotel_id: Mapped[int] = mapped_column(ForeignKey("hotels.id"), nullable=False, index=True)
+    node_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    node_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    label: Mapped[str] = mapped_column(String(256), default="")
+    attributes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class GraphEdge(Base):
+    """Hotel-scoped knowledge-graph edge. Keys refer only to this hotel's nodes."""
+
+    __tablename__ = "graph_edges"
+    __table_args__ = (
+        UniqueConstraint("hotel_id", "from_key", "to_key", "edge_type", name="uq_graph_edge"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    hotel_id: Mapped[int] = mapped_column(ForeignKey("hotels.id"), nullable=False, index=True)
+    from_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    to_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    edge_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    attributes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class RLPolicyValue(Base):
+    """Offline tabular action values fitted on one hotel's measured episodes."""
+
+    __tablename__ = "rl_policy_values"
+    __table_args__ = (
+        UniqueConstraint("hotel_id", "context_key", "action_bucket", name="uq_rl_policy_value"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    hotel_id: Mapped[int] = mapped_column(ForeignKey("hotels.id"), nullable=False, index=True)
+    context_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    action_bucket: Mapped[str] = mapped_column(String(32), nullable=False)
+    episode_count: Mapped[int] = mapped_column(Integer, default=0)
+    mean_reward: Mapped[float] = mapped_column(Float, default=0.0)
+    reward_unit: Mapped[str] = mapped_column(String(32), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class EvolutionEngineState(Base):
+    """Per-hotel evolution engine switch. Default is off when no row exists."""
+
+    __tablename__ = "evolution_engine_states"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    hotel_id: Mapped[int] = mapped_column(ForeignKey("hotels.id"), unique=True, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    sandbox_mode: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_by: Mapped[str] = mapped_column(String(64), default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class EvolutionCandidate(Base):
+    """In-hotel candidate strategy proposed by the offline learner. Never auto-executed."""
+
+    __tablename__ = "evolution_candidates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    hotel_id: Mapped[int] = mapped_column(ForeignKey("hotels.id"), nullable=False, index=True)
+    action_bucket: Mapped[str] = mapped_column(String(32), nullable=False)
+    action_label: Mapped[str] = mapped_column(String(64), default="")
+    context_key: Mapped[str] = mapped_column(String(160), default="")
+    context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    title: Mapped[str] = mapped_column(String(256), default="")
+    rationale: Mapped[str] = mapped_column(Text, default="")
+    episode_count: Mapped[int] = mapped_column(Integer, default=0)
+    mean_reward: Mapped[float] = mapped_column(Float, default=0.0)
+    reward_unit: Mapped[str] = mapped_column(String(32), default="")
+    status: Mapped[str] = mapped_column(String(32), default="proposed")
+    strategy_id: Mapped[int | None] = mapped_column(ForeignKey("strategies.id"), nullable=True)
+    sandbox_evaluation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

@@ -243,16 +243,16 @@ def episode_summary(payload: dict | None, *, action_kind: str = "", status: str 
             parts.append(f"：{comment}")
     # Honest wording: observation versus baseline, never claimed causal revenue.
     outcome = data.get("outcome") or OUTCOME_NOT_MEASURED
-    kind_label = "调价" if kind == "pricing" else ("活动" if kind == "campaign" else "决策")
-    if terminal in {"executed", "execution_partial"}:
+    from app.services.impact import observation_title
+
+    title = observation_title(terminal, kind)
+    if terminal in {"executed", "execution_partial", "rejected", "rolled_back", "execution_failed"} and kind in {"pricing", "campaign"}:
         if outcome == "measured":
-            parts.append(f"。这次{kind_label}实际带来了什么：入住窗口已实现，已对照决策时基线记录观察变化")
+            parts.append(f"。{title}：入住窗口已实现，已对照决策时基线记录观察变化")
         elif outcome == "partially_measured":
-            parts.append(f"。这次{kind_label}实际带来了什么：部分入住日已实现或已记录在手订单变化，对照决策时基线")
+            parts.append(f"。{title}：部分入住日已实现或已记录在手订单变化，对照决策时基线")
         else:
-            parts.append(f"。这次{kind_label}实际带来了什么：尚未复盘，等待入住日实现或后续在手订单变化")
-    elif terminal in {"execution_failed", "rolled_back"}:
-        parts.append("。结果影响尚未复盘")
+            parts.append(f"。{title}：尚未复盘，等待入住日实现或后续在手订单变化")
     text = "".join(parts)
     if not text.endswith("。"):
         text += "。"
@@ -355,6 +355,12 @@ def _record_anonymous_pattern(db: Session, row: MemoryRecord | None, state: dict
     from app.services.industry_patterns import record_episode_pattern
 
     record_episode_pattern(db, row, state)
+    try:
+        from app.services.knowledge_graph import upsert_episode_graph
+
+        upsert_episode_graph(db, row)
+    except Exception:
+        pass
     return row
 
 

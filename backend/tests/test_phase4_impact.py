@@ -303,11 +303,21 @@ def test_future_otb_pickup_is_partially_measured(client):
     _assert_no_invented_fields(payload)
 
 
-def test_rejected_rolled_back_and_failed_stay_unmeasured(client):
+def test_rejected_rolled_back_and_failed_are_measured(client):
     hangzhou, _ = _hotels()
     room = _room(hangzhou.id)
     today = _today()
     start, end = today - timedelta(days=6), today - timedelta(days=4)
+    expected_titles = {
+        "rejected": "否决后实际发生了什么",
+        "execution_failed": "执行失败后实际发生了什么",
+        "rolled_back": "回滚后实际发生了什么",
+    }
+    expected_kinds = {
+        "rejected": "after_no_change",
+        "execution_failed": "after_failed_write",
+        "rolled_back": "after_rollback",
+    }
     rejected = _persist_episode(
         hangzhou.id, status="rejected", date_from=start, date_to=end, room_type_id=room.id
     )
@@ -317,8 +327,15 @@ def test_rejected_rolled_back_and_failed_stay_unmeasured(client):
     rolled = _persist_episode(
         hangzhou.id, status="rolled_back", date_from=start, date_to=end, room_type_id=room.id
     )
-    _bump_metrics(hangzhou.id, start, end, room_type_id=room.id)
-    _measure(hangzhou.id, today=today)
+    for row in (rejected, failed, rolled):
+        payload = row.payload or {}
+        assert payload.get("outcome") == OUTCOME_NOT_MEASURED
+        assert payload.get("impact") is None
+        assert (payload.get("baseline") or {}).get("metrics_available") is True
+    _bump_metrics(hangzhou.id, start, end, room_type_id=room.id, revenue_delta=180)
+    result = _measure(hangzhou.id, today=today)
+    assert result["updated"] >= 3
+    headers = _headers(client)
     for memory_id, status in (
         (rejected.id, "rejected"),
         (failed.id, "execution_failed"),
@@ -326,8 +343,19 @@ def test_rejected_rolled_back_and_failed_stay_unmeasured(client):
     ):
         row = _reload(memory_id)
         assert row.approval_status == status
-        assert (row.payload or {}).get("outcome") == OUTCOME_NOT_MEASURED
-        assert (row.payload or {}).get("impact") is None
+        payload = row.payload or {}
+        assert payload.get("outcome") == OUTCOME_MEASURED
+        impact = payload.get("impact") or {}
+        assert impact["terminal_status"] == status
+        assert impact["observation_kind"] == expected_kinds[status]
+        assert impact["title"] == expected_titles[status]
+        assert impact["realized"]["delta"]["revenue_abs"] == 180 * 3
+        _assert_no_invented_fields(payload)
+        listed = client.get("/api/memories", headers=headers)
+        item = next(m for m in listed.json()["memories"] if m["id"] == memory_id)
+        assert item["outcome"] == OUTCOME_MEASURED
+        assert item["impact"]["title"] == expected_titles[status]
+        assert item["impact"]["terminal_status"] == status
 
 
 def test_hotel_isolation_does_not_write_impact_across_hotels(client):

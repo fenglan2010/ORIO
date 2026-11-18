@@ -71,6 +71,15 @@ export const api = {
   memories: (params = "") => request("/api/memories" + (params ? "?" + params : "")),
   memory: (id) => request(`/api/memories/${id}`),
   industryPatterns: (params = "") => request("/api/memories/patterns" + (params ? "?" + params : "")),
+  evolution: () => request("/api/evolution"),
+  evolutionEngine: () => request("/api/evolution/engine"),
+  toggleEvolutionEngine: (enabled) =>
+    request("/api/evolution/engine", { method: "POST", body: JSON.stringify({ enabled }) }),
+  toggleEvolutionSandbox: (sandbox_mode) =>
+    request("/api/evolution/sandbox", { method: "POST", body: JSON.stringify({ sandbox_mode }) }),
+  evolutionGraph: () => request("/api/evolution/graph"),
+  evolutionRl: () => request("/api/evolution/rl"),
+  inventEvolutionStrategies: () => request("/api/evolution/invent", { method: "POST" }),
   audit: () => request("/api/audit"),
   modelCalls: () => request("/api/audit/model-calls"),
   workflow: (id) => request(`/api/audit/workflows/${id}`),

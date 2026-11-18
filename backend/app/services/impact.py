@@ -8,6 +8,8 @@ not a forecast, and not proven causal revenue.
 
 from __future__ import annotations
 
+import logging
+
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -18,11 +20,15 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.models import DailyMetric, MemoryRecord, RoomType, Strategy
 from app.services.kpis import pack_metrics
 
+log = logging.getLogger(__name__)
+
 OUTCOME_NOT_MEASURED = "not_measured"
 OUTCOME_PARTIAL = "partially_measured"
 OUTCOME_MEASURED = "measured"
 
-MEASURABLE_STATUSES = frozenset({"executed", "execution_partial"})
+MEASURABLE_STATUSES = frozenset(
+    {"executed", "execution_partial", "rejected", "rolled_back", "execution_failed"}
+)
 MEASURABLE_KINDS = frozenset({"pricing", "campaign"})
 
 LABEL_BASELINE = "对照为决策时的本店基线，不是上年同期，也不是经因果识别后的增量收入。"
@@ -31,6 +37,43 @@ LABEL_OTB = "在手订单变化 / OTB pickup（尚未实现的入住日，不是
 LABEL_IN_PROGRESS = "今日为在途经营日，不计入已实现切片。"
 LABEL_SCENARIO = "建议情景与观察值对照，不是评分，也不是承诺兑现。"
 LABEL_IMPACT = "相对决策时基线的观察变化，不是因果收入，也不是上年同期。"
+
+OBSERVATION_TITLES = {
+    "rejected": "否决后实际发生了什么",
+    "rolled_back": "回滚后实际发生了什么",
+    "execution_failed": "执行失败后实际发生了什么",
+}
+OBSERVATION_KINDS = {
+    "executed": "after_change",
+    "execution_partial": "after_change",
+    "rejected": "after_no_change",
+    "rolled_back": "after_rollback",
+    "execution_failed": "after_failed_write",
+}
+OBSERVATION_LABELS = {
+    "rejected": "这是人审否决、价格未被改动之后的观察路径，不是因果收入，也不是上年同期。",
+    "rolled_back": "这是回滚之后的观察路径，不是因果收入，也不是上年同期。",
+    "execution_failed": "这是执行失败、写入可能未生效之后的观察路径，不是因果收入，也不是上年同期。",
+}
+
+
+def observation_title(status: str, action_kind: str = "pricing") -> str:
+    terminal = (status or "").strip()
+    if terminal in OBSERVATION_TITLES:
+        return OBSERVATION_TITLES[terminal]
+    if (action_kind or "") == "campaign":
+        return "这次活动实际带来了什么"
+    return "这次调价实际带来了什么"
+
+
+def observation_copy(status: str, action_kind: str = "pricing") -> dict[str, Any]:
+    terminal = (status or "").strip()
+    return {
+        "terminal_status": terminal,
+        "observation_kind": OBSERVATION_KINDS.get(terminal, "after_disposition"),
+        "title": observation_title(terminal, action_kind),
+        "label": OBSERVATION_LABELS.get(terminal, LABEL_IMPACT),
+    }
 
 
 def _as_date(value: Any) -> date | None:
@@ -439,6 +482,8 @@ def compare_to_baseline(
     *,
     today: date,
     recorded_scenario: dict[str, Any] | None = None,
+    terminal_status: str = "",
+    action_kind: str = "pricing",
 ) -> tuple[str, dict[str, Any] | None]:
     baseline = baseline or {}
     date_from = _as_date(baseline.get("date_from"))
@@ -459,14 +504,18 @@ def compare_to_baseline(
         return OUTCOME_NOT_MEASURED, None
     fully_realized = _window_realized(current_daily, date_from, date_to, today)
     outcome = OUTCOME_MEASURED if fully_realized and realized else OUTCOME_PARTIAL
-    notes = [LABEL_IMPACT]
+    copy = observation_copy(terminal_status, action_kind)
+    notes = [copy["label"]]
     if any(item.get("status") == "in_progress" for item in current_daily):
         notes.append(LABEL_IN_PROGRESS)
     if fully_realized and any(item.get("status") == "realized" and not item.get("kpis") for item in current_daily):
         notes.append("入住窗口已过，但部分日期仍无客房指标，这些日期未编入观察值。")
     impact: dict[str, Any] = {
         "compared_at": today.isoformat(),
-        "label": LABEL_IMPACT,
+        "terminal_status": copy["terminal_status"],
+        "observation_kind": copy["observation_kind"],
+        "title": copy["title"],
+        "label": copy["label"],
         "realized": realized,
         "otb_pickup": otb,
         "notes": notes,
@@ -504,7 +553,14 @@ def measure_episode(
     rows = load_metric_rows(db, row.hotel_id, date_from, date_to, room_type_id)
     current_daily = build_daily_facts(date_from, date_to, rows, today)
     recorded = _copy_scenario(payload.get("recorded_scenario") or payload.get("expected_impact"))
-    outcome, impact = compare_to_baseline(baseline, current_daily, today=today, recorded_scenario=recorded)
+    outcome, impact = compare_to_baseline(
+        baseline,
+        current_daily,
+        today=today,
+        recorded_scenario=recorded,
+        terminal_status=row.approval_status or payload.get("status") or "",
+        action_kind=row.action_kind or payload.get("action_kind") or "pricing",
+    )
     if outcome == OUTCOME_NOT_MEASURED or impact is None:
         return False
     frozen_baseline = dict(baseline)
@@ -543,6 +599,20 @@ def measure_hotel_episodes(db: Session, hotel_id: int, *, today: date | None = N
         else:
             skipped += 1
     db.commit()
+    try:
+        from app.services.knowledge_graph import rebuild_hotel_graph
+
+        rebuild_hotel_graph(db, hotel_id)
+    except Exception:
+        log.exception("knowledge graph rebuild failed hotel_id=%s", hotel_id)
+        db.rollback()
+    try:
+        from app.services.rl import fit_hotel_policy
+
+        fit_hotel_policy(db, hotel_id)
+    except Exception:
+        log.exception("offline policy fit failed hotel_id=%s", hotel_id)
+        db.rollback()
     return {
         "hotel_id": int(hotel_id),
         "as_of": today.isoformat(),
