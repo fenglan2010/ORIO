@@ -1,7 +1,20 @@
-const { app, BrowserWindow, shell } = require("electron");
+const { app, BrowserWindow, shell, dialog } = require("electron");
 const path = require("path");
 const { spawn } = require("child_process");
 const fs = require("fs");
+const {
+  findVenvPython,
+  resolveBackendDir,
+  resolveStaticRoot,
+  pathAnchorsForVenv,
+  defaultDistribution,
+  STATIC_MISSING_MESSAGE_ZH,
+} = require("./lib/paths");
+const {
+  resolvePythonLaunch,
+  buildBackendSpec,
+  PYTHON_MISSING_MESSAGE_ZH,
+} = require("./lib/python-resolve");
 
 const API_PORT = process.env.OIRO_API_PORT || "8765";
 let apiProcess = null;
@@ -14,42 +27,82 @@ function ensureBackendEnv() {
   const dataDir = path.join(userDataRoot(), "data");
   fs.mkdirSync(dataDir, { recursive: true });
   process.env.OIRO_DATA_DIR = dataDir;
-  process.env.OIRO_DISTRIBUTION = process.env.OIRO_DISTRIBUTION || "packaged";
+  process.env.OIRO_DISTRIBUTION =
+    process.env.OIRO_DISTRIBUTION || defaultDistribution(app.isPackaged);
   process.env.DATABASE_URL = `sqlite:///${path.join(dataDir, "oiro.db")}`;
-  const renderer = path.join(__dirname, "renderer");
-  if (fs.existsSync(renderer)) {
-    process.env.OIRO_STATIC_ROOT = renderer;
+  const staticRoot = resolveStaticRoot({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appDir: __dirname,
+  });
+  if (staticRoot) {
+    process.env.OIRO_STATIC_ROOT = staticRoot;
+  } else if (app.isPackaged && !process.env.OIRO_DEV_URL) {
+    process.env.OIRO_STATIC_ROOT = "";
   }
 }
 
 function backendCmd() {
-  const root = path.resolve(__dirname, "..");
-  const venvPython =
-    process.platform === "win32"
-      ? path.join(root, ".venv", "Scripts", "python.exe")
-      : path.join(root, ".venv", "bin", "python");
-  const python = fs.existsSync(venvPython) ? venvPython : "python3";
+  const backendDir = resolveBackendDir({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    appDir: __dirname,
+  });
+  const venvPython = findVenvPython(
+    pathAnchorsForVenv({
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      execPath: process.execPath,
+      appDir: __dirname,
+    })
+  );
+  const pythonLaunch = resolvePythonLaunch({ venvPython });
+  const spec = buildBackendSpec({ pythonLaunch, apiPort: API_PORT });
+  if (!spec) {
+    return { error: PYTHON_MISSING_MESSAGE_ZH };
+  }
   return {
-    cmd: python,
-    args: [
-      "-m",
-      "uvicorn",
-      "app.main:app",
-      "--host",
-      "127.0.0.1",
-      "--port",
-      API_PORT,
-    ],
-    cwd: path.join(root, "backend"),
+    cmd: spec.cmd,
+    args: spec.args,
+    cwd: backendDir,
   };
+}
+
+function showFatalBackendError(message) {
+  dialog.showErrorBox("OIRO 无法启动后端", message);
 }
 
 function startBackend() {
   const spec = backendCmd();
+  if (spec.error) {
+    showFatalBackendError(spec.error);
+    return;
+  }
+  const env = { ...process.env };
+  const sep = path.delimiter;
+  env.PYTHONPATH = env.PYTHONPATH
+    ? `${spec.cwd}${sep}${env.PYTHONPATH}`
+    : spec.cwd;
+
+  const stdio = app.isPackaged ? "pipe" : "inherit";
   apiProcess = spawn(spec.cmd, spec.args, {
     cwd: spec.cwd,
-    env: { ...process.env },
-    stdio: "inherit",
+    env,
+    stdio,
+  });
+  if (apiProcess.stdout) {
+    apiProcess.stdout.on("data", (chunk) => process.stdout.write(chunk));
+  }
+  if (apiProcess.stderr) {
+    apiProcess.stderr.on("data", (chunk) => process.stderr.write(chunk));
+  }
+  apiProcess.on("error", (err) => {
+    console.error("OIRO API spawn failed:", err);
+    const detail =
+      err && err.code === "ENOENT"
+        ? PYTHON_MISSING_MESSAGE_ZH
+        : String(err.message || err);
+    showFatalBackendError(detail);
   });
   apiProcess.on("exit", (code) => {
     console.log(`OIRO API exited with code ${code}`);
@@ -57,6 +110,13 @@ function startBackend() {
 }
 
 function createWindow() {
+  if (
+    app.isPackaged &&
+    !process.env.OIRO_DEV_URL &&
+    !process.env.OIRO_STATIC_ROOT
+  ) {
+    showFatalBackendError(STATIC_MISSING_MESSAGE_ZH);
+  }
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
