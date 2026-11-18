@@ -2,7 +2,7 @@
     <div class="page-head">
       <div>
         <h1>系统设置</h1>
-        <p>管理账号、角色权限、酒店信息、渠道连接与显示偏好。酒店只需授权本店 OTA 账号和密码；官方契约和接口由运维端配置。PMS 集成为后续阶段。</p>
+        <p>管理账号、角色权限、酒店信息、渠道连接与显示偏好。酒店只需授权本店 OTA 或 PMS/CRS 账号和密码；官方契约和接口由运维端配置。PMS/CRS 为官方 API 预留接入，不包含可单独售卖的轻量 PMS。</p>
       </div>
     </div>
     <p v-if="error" class="error">{{ error }}</p>
@@ -128,18 +128,7 @@
 
         <!-- pms -->
         <template v-else-if="section === 'pms'">
-          <div class="section-title">PMS 集成 <span class="phase-note">后续阶段（本轮未接通）</span></div>
-          <p class="muted">本轮未对接 Opera、Cloudbeds、Mews 等酒店管理系统，不会测试或保存连接。</p>
-          <div class="subcard" v-for="p in pmsList" :key="p">
-            <div class="row" style="justify-content:space-between">
-              <div>
-                <b>{{ p }}</b>
-                <div class="tag" style="margin-top:4px">未连接</div>
-              </div>
-              <button class="btn btn-primary btn-sm" type="button" disabled>配置连接</button>
-            </div>
-          </div>
-          <div class="notice">PMS 集成需要管理系统提供的访问权限，将在后续阶段由酒店与供应商完成。</div>
+          <PmsConnections :items="pmsConnections" @refresh="load" />
         </template>
 
         <!-- permissions -->
@@ -296,6 +285,7 @@ import { computed, inject, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import Icon from "../components/Icon.vue";
 import ChannelConnections from "../components/ChannelConnections.vue";
+import PmsConnections from "../components/PmsConnections.vue";
 import { api } from "../api/client";
 import { roleLabel, yen } from "../utils/format";
 import { can } from "../utils/permissions";
@@ -311,7 +301,6 @@ const sections = [
   { id: "notify", label: "通知设置", icon: "bell" },
   { id: "appearance", label: "外观设置", icon: "palette" },
 ];
-const pmsList = ["Opera PMS", "Cloudbeds", "Mews"];
 const roleMap = { admin: "酒店管理员", revenue_manager: "收益经理", approver: "调价审批人", analyst: "运营观察" };
 const notifyItems = [
   { key: "rank_drop", title: "排名下跌", desc: "搜索排名明显后移时提醒" },
@@ -343,6 +332,7 @@ const policy = ref({
 });
 const savingPolicy = ref(false);
 const channels = ref([]);
+const pmsConnections = ref([]);
 const users = ref([]);
 const roleCards = ref([]);
 const permissionMatrix = ref({ roles: [], rows: [] });
@@ -469,6 +459,7 @@ async function load() {
   syncConstraints(rooms.value);
   if (cfg.execution_policy) policy.value = { ...policy.value, ...cfg.execution_policy };
   channels.value = cfg.channels || [];
+  pmsConnections.value = cfg.pms_connections || [];
   permissionMatrix.value = cfg.permission_matrix || { roles: [], rows: [] };
   roleCards.value = cfg.roles || [];
   if (can("manage_users")) {

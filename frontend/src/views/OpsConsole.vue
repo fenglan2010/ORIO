@@ -15,8 +15,8 @@
     </header>
 
     <p class="muted" style="margin:0 0 16px">
-      在这里为本店安装合作方提供的官方契约、查看接口主机、开放动作，并配置写入开关和官方接口凭证。
-      酒店只需在酒店端授权本店 OTA 账号和密码。安装契约本身不会发起出站写入；示例契约（example: true）会被拒绝；本仓库不会编造生产环境 URL。
+      在这里为本店安装合作方提供的官方 OTA 或 PMS/CRS 契约、查看接口主机、开放动作，并配置读写开关和官方接口凭证。
+      酒店只需在酒店端授权本店账号和密码。安装契约本身不会发起出站请求；示例契约（example: true）会被拒绝；本仓库不会编造生产环境 URL，也不内置可单独售卖的轻量 PMS。
     </p>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="saved" class="notice notice-ok">{{ saved }}</p>
@@ -29,6 +29,7 @@
     </div>
 
     <div v-if="!hotelId" class="empty">请选择酒店。</div>
+    <h2 v-if="hotelId" class="section-title">OTA 渠道</h2>
     <div v-for="ch in channels" :key="ch.platform" class="card card-pad" style="margin-bottom:16px">
       <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
         <div>
@@ -96,6 +97,86 @@
         </div>
       </div>
     </div>
+
+    <h2 v-if="hotelId" class="section-title" style="margin-top:8px">PMS/CRS 官方接口预留</h2>
+    <p v-if="hotelId" class="muted" style="margin:0 0 16px">为选定酒店安装合作方提供的正式 PMS 或 CRS 契约。这是预留接入，不是已对接某一家 PMS 产品，也不包含轻量 PMS 或房态工作台。</p>
+    <div v-for="ch in pmsConnections" :key="ch.kind" class="card card-pad" style="margin-bottom:16px">
+      <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <div>
+          <b>{{ ch.label }}</b>
+          <div class="row" style="margin-top:4px;flex-wrap:wrap;gap:6px">
+            <StatusBadge :value="ch.status" :map="statusMap" />
+            <span class="tag" :class="ch.contract_enabled ? 'success' : ''">契约 {{ ch.contract_enabled ? "已启用" : "未启用" }}</span>
+            <span class="tag" :class="ch.read_flag_enabled ? 'success' : ''">读取开关 {{ ch.read_flag_enabled ? "已开" : "未开" }}</span>
+            <span class="tag" :class="ch.write_flag_enabled ? 'success' : ''">写入开关 {{ ch.write_flag_enabled ? "已开" : "未开" }}</span>
+            <span v-if="ch.live_ready" class="tag success">可官方拉取</span>
+          </div>
+        </div>
+      </div>
+      <div class="grid-3" style="margin-top:12px">
+        <div class="subcard"><div class="muted">契约来源</div><b>{{ sourceLabel(ch) }}</b></div>
+        <div class="subcard"><div class="muted">契约主机</div><b>{{ ch.contract_host || "—" }}</b></div>
+        <div class="subcard"><div class="muted">已开放动作</div><b>{{ (ch.action_labels || ch.open_actions || []).join("、") || "—" }}</b></div>
+      </div>
+      <div class="grid-3" style="margin-top:12px">
+        <div class="subcard"><div class="muted">酒店已授权账号</div><b>{{ ch.has_hotel_credentials ? "是" : "否" }}</b></div>
+        <div class="subcard"><div class="muted">官方接口凭证</div><b>{{ ch.has_official_credentials ? "已配置（不回显）" : "未配置" }}</b></div>
+        <div class="subcard"><div class="muted">最近校验</div><b>{{ ch.last_verified || "—" }}</b></div>
+      </div>
+      <p v-if="ch.last_error" class="muted" style="margin:8px 0 0">{{ ch.last_error }}</p>
+
+      <div class="subcard" style="margin-top:12px;background:var(--surface)">
+        <b>读取 / 写入开关与官方接口凭证</b>
+        <p class="muted" style="margin:6px 0 8px">读取开关默认关闭。打开后仍须已启用官方契约且有凭证，采集任务才会按契约出站拉取。官方接口密钥保存后不再回显，与酒店账号密码分开存放。</p>
+        <div class="row" style="justify-content:space-between;margin:10px 0">
+          <div>
+            <b>该接口读取开关</b>
+            <div class="muted">仅为运维配置，不会单独发起外部请求。</div>
+          </div>
+          <button type="button" class="toggle" :class="{ on: ch.read_flag_enabled }" :disabled="busy === ch.kind" @click="togglePmsRead(ch)">
+            <i></i>
+          </button>
+        </div>
+        <div class="row" style="justify-content:space-between;margin:10px 0">
+          <div>
+            <b>该接口写入开关</b>
+            <div class="muted">预留推送开关，默认关闭，不会单独出站。</div>
+          </div>
+          <button type="button" class="toggle" :class="{ on: ch.write_flag_enabled }" :disabled="busy === ch.kind" @click="togglePmsWrite(ch)">
+            <i></i>
+          </button>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label>官方接口 Key</label>
+            <input v-model="pmsDrafts[ch.kind].key" type="password" autocomplete="new-password" :placeholder="ch.has_official_credentials ? '已保存，不回显；留空则保持' : '可选，保存后不回显'" />
+          </div>
+          <div class="field">
+            <label>官方接口 Secret</label>
+            <input v-model="pmsDrafts[ch.kind].secret" type="password" autocomplete="new-password" :placeholder="ch.has_official_credentials ? '已保存，不回显；留空则保持' : '可选，保存后不回显'" />
+          </div>
+        </div>
+        <button class="btn btn-sm" style="margin-top:8px" type="button" :disabled="busy === ch.kind" @click="savePmsOfficialCreds(ch)">保存官方接口凭证</button>
+      </div>
+
+      <div class="subcard" style="margin-top:12px;background:var(--surface)">
+        <b>安装官方 PMS/CRS 契约</b>
+        <p class="muted" style="margin:6px 0 8px">粘贴或上传合作方提供的契约 JSON，先校验再安装。校验和安装都不会自动出站。文档示例（example: true）会被拒绝。不要填写本仓库编造的生产主机。</p>
+        <div class="field">
+          <label>契约 JSON</label>
+          <textarea v-model="pmsDrafts[ch.kind].contract_json" rows="8" style="width:100%;font-family:ui-monospace,monospace;font-size:12px" placeholder='{"platform":"pms","base_url":"https://…","auth":"header_api_key","actions":{"pull_inventory":{"method":"GET","path":"/…","kind":"read"}}}'></textarea>
+        </div>
+        <div class="row" style="margin-top:8px;flex-wrap:wrap;gap:8px">
+          <label class="btn btn-sm" style="margin:0">
+            上传 JSON
+            <input type="file" accept="application/json,.json" style="display:none" @change="onPmsContractFile(ch, $event)" />
+          </label>
+          <button class="btn btn-sm" type="button" :disabled="busy === ch.kind" @click="validatePmsContract(ch)">校验</button>
+          <button class="btn btn-primary btn-sm" type="button" :disabled="busy === ch.kind" @click="installPmsContract(ch)">安装</button>
+          <button class="btn btn-sm" type="button" :disabled="busy === ch.kind || !ch.contract_enabled" @click="uninstallPmsContract(ch)">{{ ch.contract_removable ? "卸载设置契约" : "卸载" }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 <script setup>
@@ -110,7 +191,9 @@ const me = ref({});
 const hotels = ref([]);
 const hotelId = ref(0);
 const channels = ref([]);
+const pmsConnections = ref([]);
 const drafts = reactive({});
+const pmsDrafts = reactive({});
 const busy = ref("");
 const error = ref("");
 const saved = ref("");
@@ -130,6 +213,10 @@ function ensureDraft(platform) {
   if (!drafts[platform]) drafts[platform] = { contract_json: "", key: "", secret: "" };
 }
 
+function ensurePmsDraft(kind) {
+  if (!pmsDrafts[kind]) pmsDrafts[kind] = { contract_json: "", key: "", secret: "" };
+}
+
 async function loadHotels() {
   const data = await api.opsHotels();
   hotels.value = data.hotels || [];
@@ -139,6 +226,7 @@ async function loadHotels() {
 async function loadChannels() {
   if (!hotelId.value) {
     channels.value = [];
+    pmsConnections.value = [];
     return;
   }
   const data = await api.opsChannels(hotelId.value);
@@ -147,6 +235,13 @@ async function loadChannels() {
     ensureDraft(ch.platform);
     drafts[ch.platform].key = "";
     drafts[ch.platform].secret = "";
+  }
+  const pms = await api.opsPms(hotelId.value);
+  pmsConnections.value = pms.connections || [];
+  for (const ch of pmsConnections.value) {
+    ensurePmsDraft(ch.kind);
+    pmsDrafts[ch.kind].key = "";
+    pmsDrafts[ch.kind].secret = "";
   }
 }
 
@@ -245,6 +340,126 @@ async function saveOfficialCreds(ch) {
     await api.opsOfficialCredentials(hotelId.value, ch.platform, payload);
     drafts[ch.platform].key = "";
     drafts[ch.platform].secret = "";
+    await loadChannels();
+    saved.value = "官方接口凭证已保存，不再回显。";
+  } catch (e) {
+    error.value = e.message;
+  } finally {
+    busy.value = "";
+  }
+}
+
+
+function parsePmsDraftContract(ch) {
+  const raw = (pmsDrafts[ch.kind] && pmsDrafts[ch.kind].contract_json) || "";
+  if (!raw.trim()) throw new Error("请先粘贴或上传契约 JSON");
+  return JSON.parse(raw);
+}
+
+async function onPmsContractFile(ch, ev) {
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = "";
+  if (!file) return;
+  error.value = "";
+  try {
+    ensurePmsDraft(ch.kind);
+    pmsDrafts[ch.kind].contract_json = await file.text();
+    saved.value = "已读入 " + file.name + "，请先校验再安装。";
+  } catch (e) {
+    error.value = e.message || "无法读取文件";
+  }
+}
+
+async function validatePmsContract(ch) {
+  busy.value = ch.kind;
+  error.value = "";
+  saved.value = "";
+  try {
+    const contract = parsePmsDraftContract(ch);
+    const res = await api.opsValidatePmsContract(hotelId.value, ch.kind, contract);
+    saved.value = res.message || "契约校验通过，尚未保存，也未出站。";
+  } catch (e) {
+    error.value = e.message;
+  } finally {
+    busy.value = "";
+  }
+}
+
+async function installPmsContract(ch) {
+  busy.value = ch.kind;
+  error.value = "";
+  saved.value = "";
+  try {
+    const contract = parsePmsDraftContract(ch);
+    const res = await api.opsInstallPmsContract(hotelId.value, ch.kind, contract);
+    pmsDrafts[ch.kind].contract_json = "";
+    await loadChannels();
+    saved.value = res.message || "官方 PMS/CRS 契约已安装。安装本身不会出站。";
+  } catch (e) {
+    error.value = e.message;
+  } finally {
+    busy.value = "";
+  }
+}
+
+async function uninstallPmsContract(ch) {
+  busy.value = ch.kind;
+  error.value = "";
+  saved.value = "";
+  try {
+    const res = await api.opsUninstallPmsContract(hotelId.value, ch.kind);
+    await loadChannels();
+    saved.value = res.message || "已卸载官方 PMS/CRS 契约。";
+  } catch (e) {
+    error.value = e.message;
+  } finally {
+    busy.value = "";
+  }
+}
+
+async function togglePmsRead(ch) {
+  busy.value = ch.kind;
+  error.value = "";
+  saved.value = "";
+  try {
+    await api.opsPmsReadFlag(hotelId.value, ch.kind, !ch.read_flag_enabled);
+    await loadChannels();
+    saved.value = "读取开关已更新，不会单独发起外部请求。";
+  } catch (e) {
+    error.value = e.message;
+  } finally {
+    busy.value = "";
+  }
+}
+
+async function togglePmsWrite(ch) {
+  busy.value = ch.kind;
+  error.value = "";
+  saved.value = "";
+  try {
+    await api.opsPmsWriteFlag(hotelId.value, ch.kind, !ch.write_flag_enabled);
+    await loadChannels();
+    saved.value = "写入开关已更新，不会单独发起外部请求。";
+  } catch (e) {
+    error.value = e.message;
+  } finally {
+    busy.value = "";
+  }
+}
+
+async function savePmsOfficialCreds(ch) {
+  busy.value = ch.kind;
+  error.value = "";
+  saved.value = "";
+  try {
+    const draft = pmsDrafts[ch.kind] || {};
+    const payload = {};
+    if (draft.key) payload.key = draft.key;
+    if (draft.secret) payload.secret = draft.secret;
+    if (!payload.key && !payload.secret) throw new Error("请输入要保存的官方接口凭证，或留空保持原值");
+    await api.opsPmsOfficialCredentials(hotelId.value, ch.kind, payload);
+    pmsDrafts[ch.kind].key = "";
+    pmsDrafts[ch.kind].secret = "";
     await loadChannels();
     saved.value = "官方接口凭证已保存，不再回显。";
   } catch (e) {

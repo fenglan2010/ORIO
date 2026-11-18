@@ -21,6 +21,7 @@ from app.adapters.ota.official_http import (
 )
 from app.models import ChannelConnection, DailyMetric, Hotel, Strategy
 from app.services.channels import STATUS_AUTHORIZED, has_usable_credentials, merged_credentials
+from app.services.pms import run_pms_ingest
 
 WRITE_ACTIONS = frozenset({"apply_price", "apply_campaign", "post_review_reply"})
 READ_ACTION_NAMES = frozenset(
@@ -297,11 +298,13 @@ def run_ingest(db: Session, hotel: Hotel) -> dict[str, Any]:
         if not result.get("ok"):
             result["fallback"] = None
             result["status"] = "failed"
+            result["pms_ingest"] = run_pms_ingest(db, hotel.id)
             return result
         result["status"] = "succeeded"
         result["reason"] = ""
         after_strategies = snapshot_strategies(db, hotel.id)
         result["strategy_executed"] = before_strategies != after_strategies
+        result["pms_ingest"] = run_pms_ingest(db, hotel.id)
         return result
 
     result = mock_refresh(db, hotel)
@@ -310,4 +313,5 @@ def run_ingest(db: Session, hotel: Hotel) -> dict[str, Any]:
     result["message"] = official["message"]
     after_strategies = snapshot_strategies(db, hotel.id)
     result["strategy_executed"] = before_strategies != after_strategies
+    result["pms_ingest"] = run_pms_ingest(db, hotel.id)
     return result

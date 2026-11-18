@@ -498,3 +498,43 @@ class EvolutionCandidate(Base):
     strategy_id: Mapped[int | None] = mapped_column(ForeignKey("strategies.id"), nullable=True)
     sandbox_evaluation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class PmsConnection(Base):
+    """Per-hotel official PMS/CRS authorization. Secrets stay encrypted at rest."""
+
+    __tablename__ = "pms_connections"
+    __table_args__ = (
+        UniqueConstraint("hotel_id", "kind", name="uq_pms_hotel_kind"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    hotel_id: Mapped[int] = mapped_column(ForeignKey("hotels.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)  # pms | crs
+    status: Mapped[str] = mapped_column(String(32), default="disconnected")
+    authorized_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_verified: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    credentials_encrypted: Mapped[str] = mapped_column(Text, default="")
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class PmsStagingRecord(Base):
+    """Thin staging for official PMS/CRS pulls. Does not replace demo OTA metrics."""
+
+    __tablename__ = "pms_staging_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    hotel_id: Mapped[int] = mapped_column(ForeignKey("hotels.id"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)  # pms | crs
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    family: Mapped[str] = mapped_column(String(32), default="")  # inventory | room_types | reservations
+    status: Mapped[str] = mapped_column(String(32), default="staged")  # staged | mapped | failed
+    item_count: Mapped[int] = mapped_column(Integer, default=0)
+    mapped_count: Mapped[int] = mapped_column(Integer, default=0)
+    payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    mapping_result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+

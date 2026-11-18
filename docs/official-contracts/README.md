@@ -17,3 +17,15 @@
 由环境变量或目录管理的契约不能从运维端删除，也不会删除服务器上的文件。酒店侧只展示契约是否已启用和已开放动作，不展示主机名或来源。运维端可以看到来源、主机名和支持的动作，仍不回显密钥或契约全文。
 
 契约必须包含：`platform`、`auth`、至少一个含 `method` / `path` 的动作，以及 `base_url`（可写在根上或动作上）。非本机地址必须是 https；本机测试可用 `http://127.0.0.1` 或 `localhost`。生产环境 URL 必须来自合作方正式契约，本仓库不编造携程/美团/飞猪写入路径。
+
+## PMS/CRS 预留契约
+
+`pms/` 目录只放官方 PMS/CRS 契约格式示例，同样**不会被运行时自动加载**，也不能作为生产契约安装（均带 `"example": true`）。本仓库不编造 Opera、Cloudbeds、Mews 或其他生产环境主机；`base_url` 与 `path` 必须由合作方正式契约提供。
+
+运行时加载顺序（PMS/CRS 专用，不会回退到本目录或 OTA 契约目录）：
+
+1. 环境变量 `OIRO_OFFICIAL_PMS_CONTRACT` / `OIRO_OFFICIAL_CRS_CONTRACT` 指向的 JSON 文件
+2. 目录 `OIRO_OFFICIAL_PMS_CONTRACT_DIR/{kind}.json`（也可按租户或酒店 ID 分子目录）
+3. 服务器配置项 `hotel:{id}:official_pms_contract_{kind}`（由运维端校验后安装或卸载；酒店账号不能安装契约）
+
+预留动作包括库存/房态、房型和在手订单（OTB）拉取。采集任务仅在正式（非示例）契约已启用、凭证可用且运维端打开读取开关时出站；否则安静跳过，不覆盖演示数据。这不是可单独售卖的轻量 PMS。

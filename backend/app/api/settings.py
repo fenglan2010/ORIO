@@ -11,6 +11,7 @@ from app.gateway.router import get_gateway, read_overseas_enabled
 from app.models import Hotel, SystemSetting, User
 from app.schemas import SettingsUpdate
 from app.services.channels import list_public_channels
+from app.services.pms import list_public_pms_connections
 from app.services.permissions import public_matrix_table, public_role_matrix, require_permission
 from app.services.risk_policy import load_execution_policy, save_execution_policy, validate_execution_policy
 from app.services.tenancy import public_hotel, users_for_hotel
@@ -34,6 +35,7 @@ def get_cfg(db: Session = Depends(get_db), hotel: Hotel = Depends(current_hotel)
         "overseas_enabled": read_overseas_enabled(db, get_settings()),
         "execution_policy": policy.to_public_dict(),
         "channels": list_public_channels(db, hotel.id),
+        "pms_connections": list_public_pms_connections(db, hotel.id),
         "permission_matrix": public_matrix_table(),
         "roles": public_role_matrix(users_for_hotel(db, hotel.id)),
         "critical_rule": "pricing_strategy 与 review_reply 即使开启境外模型也不得出境",

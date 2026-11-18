@@ -82,6 +82,13 @@ class Settings(BaseSettings):
     oiro_official_contract_ctrip: str = ""
     oiro_official_contract_meituan: str = ""
     oiro_official_contract_fliggy: str = ""
+    oiro_official_pms_contract_dir: str = ""
+    oiro_official_pms_contract: str = ""
+    oiro_official_crs_contract: str = ""
+    pms_read_enabled: bool = False
+    crs_read_enabled: bool = False
+    pms_write_enabled: bool = False
+    crs_write_enabled: bool = False
     oiro_credentials_key: str = ""
 
     llm_timeout_seconds: float = 20.0

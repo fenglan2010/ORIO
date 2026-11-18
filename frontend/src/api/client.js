@@ -106,6 +106,11 @@ export const api = {
   connectChannel: (platform, payload) => request(`/api/channels/${platform}`, { method: "PUT", body: JSON.stringify(payload) }),
   verifyChannel: (platform) => request(`/api/channels/${platform}/verify`, { method: "POST" }),
   disconnectChannel: (platform) => request(`/api/channels/${platform}/disconnect`, { method: "POST" }),
+  pms: () => request("/api/pms"),
+  pmsConnection: (kind) => request(`/api/pms/${kind}`),
+  connectPms: (kind, payload) => request(`/api/pms/${kind}`, { method: "PUT", body: JSON.stringify(payload) }),
+  verifyPms: (kind) => request(`/api/pms/${kind}/verify`, { method: "POST" }),
+  disconnectPms: (kind) => request(`/api/pms/${kind}/disconnect`, { method: "POST" }),
   opsLogin: (username, password) =>
     request("/api/ops/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
   opsMe: () => request("/api/ops/auth/me"),
@@ -122,6 +127,20 @@ export const api = {
     request(`/api/ops/hotels/${hotelId}/channels/${platform}/write-flag`, { method: "PUT", body: JSON.stringify({ enabled }) }),
   opsOfficialCredentials: (hotelId, platform, payload) =>
     request(`/api/ops/hotels/${hotelId}/channels/${platform}/official-credentials`, { method: "PUT", body: JSON.stringify(payload) }),
+  opsPms: (hotelId) => request(`/api/ops/hotels/${hotelId}/pms`),
+  opsPmsConnection: (hotelId, kind) => request(`/api/ops/hotels/${hotelId}/pms/${kind}`),
+  opsValidatePmsContract: (hotelId, kind, payload) =>
+    request(`/api/ops/hotels/${hotelId}/pms/${kind}/contract/validate`, { method: "POST", body: JSON.stringify(payload) }),
+  opsInstallPmsContract: (hotelId, kind, payload) =>
+    request(`/api/ops/hotels/${hotelId}/pms/${kind}/contract`, { method: "PUT", body: JSON.stringify(payload) }),
+  opsUninstallPmsContract: (hotelId, kind) =>
+    request(`/api/ops/hotels/${hotelId}/pms/${kind}/contract`, { method: "DELETE" }),
+  opsPmsReadFlag: (hotelId, kind, enabled) =>
+    request(`/api/ops/hotels/${hotelId}/pms/${kind}/read-flag`, { method: "PUT", body: JSON.stringify({ enabled }) }),
+  opsPmsWriteFlag: (hotelId, kind, enabled) =>
+    request(`/api/ops/hotels/${hotelId}/pms/${kind}/write-flag`, { method: "PUT", body: JSON.stringify({ enabled }) }),
+  opsPmsOfficialCredentials: (hotelId, kind, payload) =>
+    request(`/api/ops/hotels/${hotelId}/pms/${kind}/official-credentials`, { method: "PUT", body: JSON.stringify(payload) }),
   executeStrategy: (id) => request(`/api/strategies/${id}/execute`, { method: "POST" }),
   executeReply: (id) => request(`/api/reviews/${id}/execute`, { method: "POST" }),
   users: () => request("/api/users"),
