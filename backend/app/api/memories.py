@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.api.deps import current_hotel
@@ -57,3 +57,24 @@ def list_industry_patterns(
         "mode": "anonymous",
         "note": API_NOTE,
     }
+
+@router.get("/{memory_id}")
+def get_memory(
+    memory_id: int,
+    db: Session = Depends(get_db),
+    hotel: Hotel = Depends(current_hotel),
+):
+    """Read one in-hotel episode, including outcome and impact when present."""
+    row = (
+        db.query(MemoryRecord)
+        .filter(
+            MemoryRecord.id == int(memory_id),
+            MemoryRecord.hotel_id == hotel.id,
+            MemoryRecord.kind == MEMORY_KIND,
+        )
+        .one_or_none()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="找不到这条本店经验记录")
+    return serialize_record(row)
+

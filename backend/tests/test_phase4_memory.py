@@ -323,6 +323,6 @@ def test_payload_has_no_invented_impact(client, auth_header):
         _assert_payload_honest(item.get("payload"))
         assert item["outcome"] == OUTCOME_NOT_MEASURED
         assert item.get("impact") in (None, {})
-        assert "尚未测算" in (item.get("summary") or "") or item["approval_status"] == "rejected"
+        assert "尚未复盘" in (item.get("summary") or "") or item["approval_status"] == "rejected"
         for token in ("同比", "准确率", "带来了多少收入"):
             assert token not in (item.get("summary") or "")

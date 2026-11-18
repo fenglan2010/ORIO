@@ -38,7 +38,14 @@ def ingest_hotel(db: Session, hotel_id: int, *, actor: str = SYSTEM_ACTOR) -> di
     hotel = _hotel(db, hotel_id)
     run = start_job_run(db, hotel_id=hotel.id, job_type=JOB_INGEST, actor=actor)
     try:
-        result = run_ingest(db, hotel)
+        result = dict(run_ingest(db, hotel) or {})
+        try:
+            from app.services.impact import measure_hotel_episodes
+
+            result["impact_measurement"] = measure_hotel_episodes(db, hotel.id)
+        except Exception:
+            log.exception("impact measurement failed hotel_id=%s", hotel_id)
+            result["impact_measurement"] = {"hotel_id": hotel.id, "status": "failed", "updated": 0}
         status = result.get("status") or "succeeded"
         if status == "failed":
             finish_job_run(

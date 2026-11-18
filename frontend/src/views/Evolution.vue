@@ -15,7 +15,7 @@
         <div class="q-ico purple"><Icon name="spark" /></div>
         <div style="flex:1">
           <b>本店经验沉淀与匿名跨店学习</b>
-          <p class="muted" style="margin:4px 0 0">人审通过并执行，或人审否决后，会在本店留下一条可复查的决策记录，供后续建议引用。跨店学习已开始，但是匿名模式，不展示其他酒店名称，不会训练模型，不会自动改价，也不会跳过人审。</p>
+          <p class="muted" style="margin:4px 0 0">人审通过并执行，或人审否决后，会在本店留下一条可复查的决策记录，供后续建议引用。已执行的调价或活动，会在入住日实现或在手订单变化后，对照决策时基线做观察复盘；观察变化不是因果收入，也不是上年同期。跨店学习已开始，但是匿名模式，不展示其他酒店名称，不会训练模型，不会自动改价，也不会跳过人审。</p>
         </div>
       </div>
       <div class="grid-4" style="margin-top:14px">
@@ -53,18 +53,31 @@
     <div class="card card-pad">
       <div class="section-title">
         本店经验记录
-        <span class="phase-note">不测算调价带来的实际收益</span>
+        <span class="phase-note">对照决策时基线观察，不是因果收入</span>
       </div>
       <p v-if="loadError" class="muted">{{ loadError }}</p>
       <div v-else-if="!memories.length" class="muted" style="padding:8px 0 4px">
-        暂无已沉淀的本店决策。生成策略并完成人审（通过后执行，或否决）后，会在这里留下记录。这次调价实际带来了什么，尚未测算。
+        暂无已沉淀的本店决策。生成策略并完成人审（通过后执行，或否决）后，会在这里留下记录。已执行的调价可在入住日后对照基线复盘。
       </div>
       <div class="queue-item" v-for="e in memories" :key="e.id">
         <div class="meta">
           <h3>{{ formatStamp(e.created_at) }} · {{ e.action_kind_label || "决策" }} · {{ e.status_label || e.approval_status }}</h3>
           <p>{{ e.summary }}</p>
           <p class="muted" v-if="detailLine(e)">{{ detailLine(e) }}</p>
-          <p class="impact">结果影响：尚未测算</p>
+          <div v-if="hasObservedImpact(e)" class="impact-review">
+            <b>{{ impactTitle(e) }}</b>
+            <p class="muted">{{ (e.impact && e.impact.label) || "相对决策时基线的观察变化，不是因果收入。" }}</p>
+            <div v-if="e.impact && e.impact.realized" class="subcard" style="margin-top:8px">
+              <div class="muted">已实现入住日（{{ e.impact.realized.date_from }} 至 {{ e.impact.realized.date_to }}）</div>
+              <p>{{ sliceLine(e.impact.realized, { revenue: true }) }}</p>
+            </div>
+            <div v-if="e.impact && e.impact.otb_pickup" class="subcard" style="margin-top:8px">
+              <div class="muted">在手订单变化 / OTB pickup（不是已实现客房收入，也不是预测）</div>
+              <p>{{ sliceLine(e.impact.otb_pickup, { revenue: false }) }}</p>
+            </div>
+            <p v-if="scenarioLine(e)" class="muted" style="margin-top:8px">{{ scenarioLine(e) }}</p>
+          </div>
+          <p v-else class="impact">{{ unmeasuredText(e) }}</p>
         </div>
       </div>
     </div>
@@ -130,7 +143,7 @@ import LineChart from "../components/LineChart.vue";
 import Icon from "../components/Icon.vue";
 import { api } from "../api/client";
 import { shellState } from "../utils/shellState";
-import { formatDate } from "../utils/format";
+import { formatDate, pct, signed, yen } from "../utils/format";
 
 const series = ref([]);
 const memories = ref([]);
@@ -146,6 +159,7 @@ const gens = [
   { id: "G2", title: "可解释策略", desc: "启发式定价 + 人审", active: true },
   { id: "G3", title: "本店经验沉淀", desc: "记录本店已执行或已否决的决策", active: true },
   { id: "G4", title: "跨酒店学习", desc: "匿名模式引用，不迁移策略，不训练模型", active: true },
+  { id: "G5", title: "决策后观察", desc: "对照决策时基线观察变化，不是进化引擎，不是因果收入", active: true },
 ];
 const longs = [
   { label: "口碑与回复质量", val: "人审保护", pct: 80, color: "#8200db" },
@@ -155,6 +169,71 @@ const longs = [
 
 function formatStamp(value) {
   return formatDate(value) || "—";
+}
+
+
+function impactTitle(e) {
+  if (e.action_kind === "campaign") return "这次活动实际带来了什么";
+  return "这次调价实际带来了什么";
+}
+
+function hasObservedImpact(e) {
+  const outcome = e?.outcome;
+  const impact = e?.impact;
+  if (outcome !== "measured" && outcome !== "partially_measured") return false;
+  if (!impact || typeof impact !== "object") return false;
+  return Boolean(impact.realized || impact.otb_pickup);
+}
+
+function unmeasuredText(e) {
+  const title = impactTitle(e);
+  const status = e?.approval_status || "";
+  if (["rejected", "execution_failed", "rolled_back"].includes(status)) {
+    return `${title}：未进入已执行状态，不自动复盘。`;
+  }
+  if (e?.action_kind === "review_reply") {
+    return "评价回复不按调价入住窗口自动复盘。";
+  }
+  return `${title}：尚未复盘。等待入住日实现或后续在手订单变化。`;
+}
+
+function sliceLine(slice, { revenue } = { revenue: true }) {
+  if (!slice) return "";
+  const cur = slice.current_kpis || {};
+  const delta = slice.delta || {};
+  const bits = [];
+  if (revenue && cur.revenue != null) {
+    bits.push(`客房收入 ${yen(cur.revenue)}，相对基线 ${signed(delta.revenue_abs || 0, " 元", 0)}（${signed(delta.revenue_pct || 0, "%")}）`);
+  }
+  if (cur.occupancy != null) {
+    bits.push(`出租率 ${pct(cur.occupancy)}，相对基线 ${signed(delta.occupancy_pp || 0, " 个百分点")}`);
+  }
+  if (cur.sold_rooms != null) {
+    bits.push(`已售/在手 ${cur.sold_rooms} 间夜，相对基线 ${signed(delta.sold_rooms_abs || 0, " 间夜", 0)}`);
+  }
+  if (cur.adr != null && revenue) {
+    bits.push(`ADR ${yen(cur.adr, 1)}，相对基线 ${signed(delta.adr_abs || 0, " 元", 1)}`);
+  }
+  if (cur.orders != null && !revenue) {
+    bits.push(`在手订单 ${cur.orders} 单，相对基线 ${signed(delta.orders_abs || 0, " 单", 0)}`);
+  }
+  return bits.join("；") || (slice.label || "");
+}
+
+function scenarioLine(e) {
+  const cmp = e?.impact?.scenario_comparison;
+  if (!cmp || !cmp.recorded_scenario) return "";
+  const rec = cmp.recorded_scenario;
+  const obs = cmp.observed || {};
+  const bits = ["建议情景对照（不是评分，也不是承诺兑现）"];
+  if (cmp.compared_slice) bits.push(`切片：${cmp.compared_slice}`);
+  if (rec.occupancy_delta_pct != null && obs.occupancy_delta_pct != null) {
+    bits.push(`出租率情景 ${signed(rec.occupancy_delta_pct, " 个百分点")}，观察 ${signed(obs.occupancy_delta_pct, " 个百分点")}`);
+  }
+  if (rec.revenue_delta != null && obs.revenue_delta != null) {
+    bits.push(`客房收入情景 ${signed(rec.revenue_delta, " 元", 0)}，观察 ${signed(obs.revenue_delta, " 元", 0)}`);
+  }
+  return bits.join(" · ");
 }
 
 function detailLine(e) {

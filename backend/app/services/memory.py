@@ -1,9 +1,9 @@
 """In-hotel decision memory (Phase IV increment 1).
 
-Strictly scoped by hotel_id. Records only facts already present on the
-run / strategy / write ledger. Does not invent YoY, accuracy, or
-post-decision revenue impact. Cross-hotel identifiable reads are not allowed;
-anonymized industry patterns are recorded separately.
+Strictly scoped by hotel_id. Records facts already present on the run / strategy / write ledger,
+plus a decision-time metric baseline for later observation. Does not invent
+YoY, accuracy scores, or causal post-decision revenue. Cross-hotel identifiable
+reads are not allowed; anonymized industry patterns are recorded separately.
 """
 
 from __future__ import annotations
@@ -186,10 +186,16 @@ def build_payload(db: Session, state: dict) -> dict[str, Any]:
         "room_name": room_name,
         "action_kind": kind,
         "review_comment": state.get("review_comment") or "",
-        # Hook only: impact attribution is a later product item, not this increment.
+        # Outcome stays not_measured until a later comparison against this baseline.
         "outcome": OUTCOME_NOT_MEASURED,
         "impact": None,
     }
+    from app.services.impact import attach_decision_baseline
+
+    attach_decision_baseline(db, state, payload)
+    payload["outcome"] = OUTCOME_NOT_MEASURED
+    if payload.get("impact") in (None, {}):
+        payload["impact"] = None
     from app.services.industry_patterns import signal_types_of
 
     flags = signal_types_of(state, payload)
@@ -235,9 +241,18 @@ def episode_summary(payload: dict | None, *, action_kind: str = "", status: str 
         comment = data.get("review_comment") or ""
         if comment:
             parts.append(f"：{comment}")
-    # Always honest about unmeasured impact.
-    if terminal in {"executed", "execution_partial", "execution_failed", "rolled_back"}:
-        parts.append("。结果影响尚未测算")
+    # Honest wording: observation versus baseline, never claimed causal revenue.
+    outcome = data.get("outcome") or OUTCOME_NOT_MEASURED
+    kind_label = "调价" if kind == "pricing" else ("活动" if kind == "campaign" else "决策")
+    if terminal in {"executed", "execution_partial"}:
+        if outcome == "measured":
+            parts.append(f"。这次{kind_label}实际带来了什么：入住窗口已实现，已对照决策时基线记录观察变化")
+        elif outcome == "partially_measured":
+            parts.append(f"。这次{kind_label}实际带来了什么：部分入住日已实现或已记录在手订单变化，对照决策时基线")
+        else:
+            parts.append(f"。这次{kind_label}实际带来了什么：尚未复盘，等待入住日实现或后续在手订单变化")
+    elif terminal in {"execution_failed", "rolled_back"}:
+        parts.append("。结果影响尚未复盘")
     text = "".join(parts)
     if not text.endswith("。"):
         text += "。"

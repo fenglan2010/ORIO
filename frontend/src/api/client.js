@@ -69,6 +69,7 @@ export const api = {
   chatHistory: () => request("/api/chat/history"),
   chat: (message) => request("/api/chat", { method: "POST", body: JSON.stringify({ message }) }),
   memories: (params = "") => request("/api/memories" + (params ? "?" + params : "")),
+  memory: (id) => request(`/api/memories/${id}`),
   industryPatterns: (params = "") => request("/api/memories/patterns" + (params ? "?" + params : "")),
   audit: () => request("/api/audit"),
   modelCalls: () => request("/api/audit/model-calls"),
